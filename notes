@@ -1,0 +1,148 @@
+0. maintain lessons.md
+
+1. Core: intelligence is made of three core abilities. They are the spontaneous predicting ability, the reactive predicting ability and the ability to gain from the prediction. In this agent design, this is expressed by valuing three modules: the Reactionm Prediction and evaluation modules.
+2. The purpose of this project is to make an agent that we can evaluate their three abilities seperately, while being able to switch backbone models and prompts for each part easily. In the end, we will find out what model + prompt works the best for each module. 
+3. There are two different transportation of information. Intermodule and intramodule. Intramodule communication follows the rules stated in self.md, while intermodule communication follows the rules in the rulebook.md within each module. 
+4. There are 5 module families (classes) which I will refer to as families from now on. Each have its main and sub-modules. Apart from the main module, each sub-module should be able to add or drop dynamically. Giving the agent flexible abilities.
+They are: <Pr> Prediction/plan module
+          <Re> Reaction/input module
+          <Ev> Evaluation/action module
+          <Me> Memory/logging module
+          <Mo> Motor/output module
+5. The self.md describes how the entire agent works, which is divided in parts. One for the entire agent, and one for each family. The agent also holds three functions regarding self.md. These are: (1)load_all: loads the whole self.md, (2) load_part: loads parts of self.md, (3) write_part: writes to a part of self.md, this requires a permission check that is maintained in interface/permissions.py. This permission may be changed during runtime. The main idea is that each family can edit the part of self that describes it. The prediction/plan family, being the main intelligence piece, default has the permission to change anything in the project, and thus have the permission to write_part any part.  
+6. 申告制: When a sub-module is added, it sould follow a protocal and tell the main module what it is used for and how to use it. The main module of the family then broadcasts to all modules about the new ability after it updates the part of its family in self.md.
+7. All intermodule communication goes through a bus in the agent with a format that needs to be strictly followed. The format is defined in interface/bus.py. It includes: (1) the messageID, (2) the parent messageID that triggers this message, (3) a timecode maintained by the system for resource management purpose, (4) the context, (5) the body, (6) the sender, (7) the receiver, and (8) resources.
+8. The messageID follows a naming rule. Each family holds a counter for how many message it sent, the messageID is the 2 letter family name + 8 digit counter + path name. The path name is an one letter representation for common cognition paths described below.
+9. Paths: P path - <Ev>-><Pr>-><Ev>-><Mo> or <Me>
+          R path - <Re>-><Mo>
+          E path - <Re>-><Ev>
+          U path - <Re>-><Pr>
+          D path - <Pr>-><Re> or <Ev> or <Mo> or <Me>
+10. The agent system manages three kind of resources: (1) token ount, (2) thinking time, and (3) RAM, we don't limit and track these resources until stage3 in this project.
+11. For each family and the agent system itself, there will be states. For starters, there will only be two types of states: [idle, thinking]. The main module of each agent should be able to add new states themselves in the future. (of course they will need to broadcast that they added a new state to inform other families). The states of each family will be indicated by the workload (work queued in working stack, compared to the resource each family have) and updated automatically. The state of the agent system will be indicated by the overall workload / resource.
+12. Each main module should asyncronously provide functions for other modules to:
+    (1) get current amount of resource in family
+    (2) get task queue information (length, maxlength, resource required, estimated time)
+    (3) change prompt / restart module / change model
+    (4) get limit of family (context max token size, etc)
+    (5) and other family specific functions, such as the speak function in <Mo>, or memory search in <Me>
+    (6) signal to pause work and answer questions
+    each are locked behind permission management, you need to ask <Pr> to ask for you or give you permission if you really need to. (these should be written in self.md)
+13. Each module should be able to access everything within its reigon (folder)
+14. Log everything. What and when each module is doing, each thought and each message sent.
+---
+Planned functions (submodules) for each family
+
+Admin: (not really functions, but these will be in the folder) 
+    - visualization 
+    - unit tests
+    - debug
+    - yamls
+
+<Re>: 
+    - Vision
+    - Audio
+    - Net-Search
+    - Extra
+
+<Pr>:
+    - Plan
+
+<Ev>:
+    - Evaluate Self
+    - Evaluate Environment
+    - Evaluate Goal
+    - Weights update
+    - Generate afforded actions
+
+<Me>:
+    - Short-term
+    - Long-term
+    - Logs
+
+<Mo>:
+    - Speak
+    - Do
+
+Stage 1 expected outcomes: Play different games without changing structure.
+1. Tik-Tak-Toe
+2. Poker
+3. Uno
+
+The system structure is still in planning stage, we will move on to finalize and imporve it.
+
+---
+/btw how will you evaluate the current structure? What are places I can improve on?
+
+    Based on the architecture as defined in the plan and the code being written, here's my evaluation:
+
+    Strengths
+
+    - Clean separation of concerns — Each family (Re, Pr, Ev, Me, Mo) maps to a distinct cognitive function with clear responsibilities. No ambiguity
+    about where logic lives.
+    - Cognition path routing — The VALID_PATH_ROUTES constraint is elegant. It prevents families from talking to each other in undefined ways, which
+    enforces the cognitive model structurally rather than by convention.
+    - Permission model — Pr-as-authority with delegated self-scope is a good fit for the "prediction module as executive function" metaphor.
+    - litellm choice — Avoids premature abstraction of LLM providers. One dependency handles OpenAI/Anthropic/Ollama routing.
+
+    Areas to Improve
+
+    1. Bus is a single point of failure with no backpressure
+
+    Each module gets an unbounded asyncio.Queue. If Ev is slow and Pr keeps dispatching, the queue grows forever. Consider adding maxsize to queues
+    and a strategy for when they're full (drop, block, or signal the sender).
+
+    2. No message acknowledgment or error propagation
+
+    BusMessage flows one way. If Mo fails to execute a speak(), there's no mechanism for the sender to know. You'll eventually want a reply/ack
+    pattern or at minimum a dead-letter queue.
+
+    3. SelfModel concurrency
+
+    asyncio.Lock protects writes, but multiple families reading while one writes can get stale data. Consider whether you need read-write locking or
+    if eventual consistency is acceptable.
+
+    4. No lifecycle hooks on SubModule
+
+    SubModules have handle_message() but no start()/stop(). If a submodule needs setup (e.g., loading an embedding index for Me submodules), there's
+    no standard way to do it.
+
+    5. Config is static at boot
+
+    _build_llm_config() runs once at startup, but change_model() and change_prompt() exist on MainModule. The hot-swap path and the boot path should
+    share logic to avoid divergence.
+
+    6. Missing observability between families
+
+    You have structured logging, but no way to trace a message chain across families. A trace_id or correlation_id on BusMessage (propagated from
+    parent to child) would make debugging multi-hop flows (like P path: Ev→Pr→Ev→Mo) much easier.
+
+    7. Evaluation weights are log-only (Stage 1)
+
+    This is noted in the plan, but worth flagging: update_weights() is where learning happens. The sooner you design the feedback structure (what
+    outcomes look like, how they flow back to Ev), the less you'll have to refactor later.
+
+    8. No graceful degradation
+
+    If one family's LLM call times out or errors, there's no circuit-breaker or fallback. The _message_loop() could stall. Consider timeout wrappers
+    around think() calls and a strategy for partial failures.
+
+    9. VALID_PATH_ROUTES may be too rigid
+
+    The current routing table is hardcoded. As you add new cognitive patterns, you'll need to modify bus.py. Consider making routes configurable via
+    default.yaml so new paths can be added without code changes.
+
+    10. Missing test seams
+
+    The LLMClient directly calls litellm.acompletion(). For testing, you'll want to inject a mock completion function. Consider accepting a
+    completion_fn parameter or making it overridable.
+
+    Priority Order
+
+    If I had to rank what to address first after getting the stubs working:
+    1. Backpressure on queues (prevents resource exhaustion)
+    2. Trace/correlation IDs (you'll need this the moment you debug anything)
+    3. Test seams on LLMClient (enables development without burning API tokens)
+
+    The foundation is solid — the cognitive metaphor maps well to software modules, and the permission/routing constraints enforce the design intent
+    at runtime rather than relying on discipline.
