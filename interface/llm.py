@@ -36,6 +36,13 @@ class LLMClient:
     model, temperature, and system prompt.
     """
 
+    # SUGGESTION (Test seams):
+    # Accept an optional `completion_fn` parameter in __init__ that defaults to
+    # litellm.acompletion. In tests, inject a mock:
+    #   mock_fn = AsyncMock(return_value=fake_response)
+    #   client = LLMClient(config, logger, completion_fn=mock_fn)
+    # This avoids burning API tokens during development and testing.
+
     def __init__(self, config: LLMConfig, logger: ModuleLogger) -> None:
         self._config = config
         self._logger = logger

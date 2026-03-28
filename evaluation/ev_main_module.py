@@ -47,6 +47,10 @@ class EvaluationModule(MainModule):
             "generate_affordances: LLM brainstorms possible actions"
         )
 
+    # TODO: Design feedback structure for update_weights() — define outcome
+    # schema, feedback flow from Mo back to Ev, and weight storage format
+    # before Stage 2.
+
     async def update_weights(self, outcome: dict[str, Any]) -> None:
         """Update internal evaluation weights based on an outcome.
 

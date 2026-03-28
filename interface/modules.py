@@ -7,11 +7,18 @@ and attach to their parent MainModule at runtime via the self-registration proto
 from __future__ import annotations
 
 import asyncio
+import uuid
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from typing import Any, Optional
 
-from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
+from interface.bus import (
+    BusMessage,
+    CognitionPath,
+    FamilyPrefix,
+    MessageBus,
+    QueueFullSignal,
+)
 from interface.llm import LLMClient, LLMConfig
 from interface.logging import ModuleLogger
 from interface.permissions import PermissionAction, PermissionManager
@@ -71,10 +78,19 @@ class BaseModule(ABC):
         *,
         context: str = "",
         parent_message_id: str | None = None,
+        trace_id: str = "",
         resources: dict[str, Any] | None = None,
     ) -> str:
         """Build and send a BusMessage, returning the new message_id."""
         raise NotImplementedError("send_message requires MainModule context")
+
+    # SUGGESTION (Graceful degradation):
+    # Wrap think() calls with asyncio.wait_for(timeout=thinking_timeout_ms/1000).
+    # On timeout or LLM error, set state to ERROR, log the failure, and either:
+    #   a) Return a fallback response (e.g. "no response available")
+    #   b) Re-queue the task for retry with exponential backoff (max 3 retries)
+    # Consider a circuit-breaker pattern: after N consecutive failures, stop
+    # sending to that family and notify Pr to re-route.
 
     async def think(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
         """Call the LLM and log the interaction."""
@@ -116,6 +132,11 @@ class MainModule(BaseModule):
             self.family_prefix, self._message_counter, path
         )
 
+    @staticmethod
+    def _generate_trace_id() -> str:
+        """Generate a new trace ID (first 12 hex chars of uuid4)."""
+        return uuid.uuid4().hex[:12]
+
     async def send_message(
         self,
         receiver: FamilyPrefix,
@@ -124,10 +145,24 @@ class MainModule(BaseModule):
         *,
         context: str = "",
         parent_message_id: str | None = None,
+        trace_id: str = "",
         resources: dict[str, Any] | None = None,
     ) -> str:
-        """Build, validate, and send a message on the bus."""
+        """Build, validate, and send a message on the bus.
+
+        If trace_id is empty and no parent_message_id is provided, a new
+        trace_id is generated. This allows tracing message chains across
+        families (e.g. the full P path: Ev->Pr->Ev->Mo).
+
+        Returns the message_id. If the receiver's queue is full, logs a
+        warning and returns the message_id prefixed with "FULL:" to signal
+        backpressure to the caller.
+        """
         msg_id = self.next_message_id(path)
+
+        # Propagate or generate trace_id
+        if not trace_id:
+            trace_id = self._generate_trace_id()
 
         if not MessageBus.validate_route(self.family_prefix, receiver, path):
             self._logger.action(
@@ -138,6 +173,7 @@ class MainModule(BaseModule):
         message = BusMessage(
             message_id=msg_id,
             parent_message_id=parent_message_id,
+            trace_id=trace_id,
             timecode=MessageBus.now(),
             context=context,
             body=body,
@@ -145,8 +181,41 @@ class MainModule(BaseModule):
             receiver=receiver,
             resources=resources,
         )
-        await self._bus.send(message)
+        result = await self._bus.send(message)
+
+        if isinstance(result, QueueFullSignal):
+            self._logger.action(
+                f"Send failed (queue full): {msg_id} -> {receiver} "
+                f"(queue_size={result.queue_size})"
+            )
+            return f"FULL:{msg_id}"
+
         return msg_id
+
+    async def send_ack(
+        self, original_message: BusMessage, *, queue_size: int | None = None
+    ) -> None:
+        """Send an acknowledgment back to the sender of a message.
+
+        Ack messages use the same message ID with a lowercase prefix
+        and carry the current queue size in the body.
+        """
+        ack_id = MessageBus.make_ack_id(original_message.message_id)
+        ack = BusMessage(
+            message_id=ack_id,
+            parent_message_id=original_message.message_id,
+            trace_id=original_message.trace_id,
+            timecode=MessageBus.now(),
+            context="ack",
+            body={
+                "ack": True,
+                "queue_size": queue_size if queue_size is not None else self._queue.qsize(),
+            },
+            sender=self.family_prefix,
+            receiver=original_message.sender,
+            is_ack=True,
+        )
+        await self._bus.send(ack)
 
     # ── Sub-module management (申告制) ──
 
@@ -195,6 +264,12 @@ class MainModule(BaseModule):
             "max_length": self._task_queue.maxsize,
         }
 
+    # SUGGESTION (Config divergence):
+    # Extract _build_llm_config() logic into a shared ConfigResolver class that
+    # both TakenokoAgent.start() and MainModule.change_*() use, so the boot path
+    # and hot-swap path stay in sync. The resolver would read from YAML at boot
+    # and validate the same constraints on hot-swap.
+
     async def change_prompt(self, path: str, requester: FamilyPrefix) -> None:
         """Change the system prompt file. Requires permission."""
         if not self._permissions.check(
@@ -241,7 +316,12 @@ class MainModule(BaseModule):
 
     @abstractmethod
     async def _message_loop(self) -> None:
-        """Main processing loop — each family implements its own."""
+        """Main processing loop — each family implements its own.
+
+        Contract: when a message arrives, the loop should send an ack back
+        to the sender via send_ack() with the current queue size before
+        processing the message body.
+        """
         raise NotImplementedError("Subclasses must implement _message_loop()")
 
     async def start(self) -> None:
@@ -261,6 +341,10 @@ class SubModule(BaseModule):
     Sub-modules attach to a parent MainModule and announce their
     capabilities via the self-registration protocol (申告制).
     """
+
+    # TODO: Add start()/stop() lifecycle hooks with setup/teardown for
+    # SubModules (e.g. loading embedding indices for Me submodules,
+    # initializing audio streams for Re submodules).
 
     def __init__(
         self,

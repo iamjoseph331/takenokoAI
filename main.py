@@ -43,30 +43,36 @@ class SelfModel:
 
     async def load_all(self) -> dict[str, str]:
         """Read self.md and parse into sections keyed by header name."""
-        if not self._path.exists():
-            self._logger.action(f"self.md not found at {self._path}, starting empty")
-            self._sections = {}
-            return {}
+        async with self._lock:
+            if not self._path.exists():
+                self._logger.action(f"self.md not found at {self._path}, starting empty")
+                self._sections = {}
+                return {}
 
-        async with aiofiles.open(self._path, "r", encoding="utf-8") as f:
-            content = await f.read()
+            async with aiofiles.open(self._path, "r", encoding="utf-8") as f:
+                content = await f.read()
 
-        self._sections = self._parse_sections(content)
-        self._logger.action(
-            f"Loaded self.md: {len(self._sections)} sections"
-        )
-        return dict(self._sections)
+            self._sections = self._parse_sections(content)
+            self._logger.action(
+                f"Loaded self.md: {len(self._sections)} sections"
+            )
+            return dict(self._sections)
 
     async def load_part(self, section: str) -> str:
         """Read a single section from self.md."""
         if not self._sections:
             await self.load_all()
-        return self._sections.get(section, "")
+        async with self._lock:
+            return self._sections.get(section, "")
 
     async def write_part(
         self, section: str, content: str, *, requester: FamilyPrefix
     ) -> None:
-        """Update a section in self.md. Permission-checked."""
+        """Update a section in self.md. Permission-checked.
+
+        Acquires the lock for both the in-memory update and the disk flush
+        to prevent reads from seeing partially-written state.
+        """
         from interface.permissions import PermissionAction
 
         if not self._permissions.check(
@@ -76,22 +82,27 @@ class SelfModel:
                 f"{requester} lacks WRITE_SELF_MD permission for section {section!r}"
             )
 
-        self._sections[section] = content
-        self._logger.action(
-            f"self.md section '{section}' updated by {requester}"
-        )
-        await self._flush()
+        async with self._lock:
+            self._sections[section] = content
+            self._logger.action(
+                f"self.md section '{section}' updated by {requester}"
+            )
+            await self._flush_unlocked()
 
     async def _flush(self) -> None:
-        """Write current sections back to self.md on disk."""
+        """Write current sections back to self.md on disk (acquires lock)."""
         async with self._lock:
-            lines: list[str] = []
-            for header, body in self._sections.items():
-                lines.append(f"## {header}\n")
-                lines.append(body.strip() + "\n\n")
+            await self._flush_unlocked()
 
-            async with aiofiles.open(self._path, "w", encoding="utf-8") as f:
-                await f.write("".join(lines))
+    async def _flush_unlocked(self) -> None:
+        """Write current sections back to self.md on disk (caller holds lock)."""
+        lines: list[str] = []
+        for header, body in self._sections.items():
+            lines.append(f"## {header}\n")
+            lines.append(body.strip() + "\n\n")
+
+        async with aiofiles.open(self._path, "w", encoding="utf-8") as f:
+            await f.write("".join(lines))
 
     @staticmethod
     def _parse_sections(content: str) -> dict[str, str]:
@@ -144,8 +155,10 @@ class TakenokoAgent:
         self._logger = ModuleLogger("SYS", "agent")
         self._logger.action("TakenokoAI booting...")
 
-        # 3. Bus
-        self._bus = MessageBus(self._logger)
+        # 3. Bus (with per-family queue limits for backpressure)
+        resources_cfg = self._config.get("resources", {})
+        queue_limits = resources_cfg.get("queue_limits", {})
+        self._bus = MessageBus(self._logger, queue_limits=queue_limits)
 
         # 4. Permissions
         self._permissions = PermissionManager(self._logger)
