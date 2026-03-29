@@ -10,12 +10,14 @@ LLM providers via litellm's model string routing:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, TYPE_CHECKING
 
 import litellm
 
 from interface.logging import ModuleLogger
+
+if TYPE_CHECKING:
+    from interface.prompt_assembler import PromptAssembler
 
 
 @dataclass
@@ -25,7 +27,6 @@ class LLMConfig:
     model_name: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
-    system_prompt_path: str | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -43,9 +44,15 @@ class LLMClient:
     #   client = LLMClient(config, logger, completion_fn=mock_fn)
     # This avoids burning API tokens during development and testing.
 
-    def __init__(self, config: LLMConfig, logger: ModuleLogger) -> None:
+    def __init__(
+        self,
+        config: LLMConfig,
+        logger: ModuleLogger,
+        prompt_assembler: PromptAssembler | None = None,
+    ) -> None:
         self._config = config
         self._logger = logger
+        self._prompt_assembler = prompt_assembler
         self._system_prompt_cache: str | None = None
 
     @property
@@ -53,29 +60,22 @@ class LLMClient:
         return self._config
 
     async def load_system_prompt(self) -> str:
-        """Read the system prompt from the configured .md file path. Caches result."""
+        """Build the system prompt via the PromptAssembler. Caches result."""
         if self._system_prompt_cache is not None:
             return self._system_prompt_cache
 
-        if self._config.system_prompt_path is None:
+        if self._prompt_assembler is None:
             self._system_prompt_cache = ""
             return ""
 
-        path = Path(self._config.system_prompt_path)
-        if not path.exists():
-            self._logger.action(
-                f"System prompt file not found: {path}, using empty prompt"
-            )
-            self._system_prompt_cache = ""
-            return ""
-
-        self._system_prompt_cache = path.read_text(encoding="utf-8")
-        self._logger.action(f"Loaded system prompt from {path}")
+        self._system_prompt_cache = await self._prompt_assembler.assemble()
         return self._system_prompt_cache
 
     async def reload_system_prompt(self) -> str:
-        """Force-reload the system prompt from disk."""
+        """Force-reload the system prompt (re-reads all sources from disk)."""
         self._system_prompt_cache = None
+        if self._prompt_assembler is not None:
+            self._prompt_assembler.invalidate_cache()
         return await self.load_system_prompt()
 
     async def complete(
@@ -161,6 +161,3 @@ class LLMClient:
                 self._logger.action(f"LLM config updated: {key}={value}")
             else:
                 raise ValueError(f"Unknown LLM config key: {key!r}")
-        # Invalidate prompt cache if path changed
-        if "system_prompt_path" in kwargs:
-            self._system_prompt_cache = None

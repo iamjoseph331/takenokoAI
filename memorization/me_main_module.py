@@ -9,6 +9,7 @@ from interface.llm import LLMConfig
 from interface.logging import ModuleLogger
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
+from interface.prompt_assembler import PromptAssembler
 
 
 class MemorizationModule(MainModule):
@@ -24,8 +25,12 @@ class MemorizationModule(MainModule):
         logger: ModuleLogger,
         llm_config: LLMConfig,
         permissions: PermissionManager,
+        prompt_assembler: PromptAssembler | None = None,
     ) -> None:
-        super().__init__(FamilyPrefix.Me, bus, logger, llm_config, permissions)
+        super().__init__(
+            FamilyPrefix.Me, bus, logger, llm_config, permissions,
+            prompt_assembler=prompt_assembler,
+        )
 
     async def store(
         self,
