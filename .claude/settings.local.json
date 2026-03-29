@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest admin/utests/ -v)",
+      "Bash(python -c \"from interface.markdown_utils import parse_markdown_sections; print\\(''markdown_utils OK''\\)\")",
+      "Bash(python -c \"from interface.llm import LLMConfig, LLMClient; print\\(''llm OK''\\)\")",
+      "Bash(python -c \"from interface.prompt_assembler import PromptAssembler; print\\(''prompt_assembler OK''\\)\")",
+      "Bash(python -c \"from interface.character_model import CharacterModel; print\\(''character_model OK''\\)\")"
+    ]
+  }
+}

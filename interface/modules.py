@@ -22,6 +22,7 @@ from interface.bus import (
 from interface.llm import LLMClient, LLMConfig
 from interface.logging import ModuleLogger
 from interface.permissions import PermissionAction, PermissionManager
+from interface.prompt_assembler import PromptAssembler
 
 
 class ModuleState(StrEnum):
@@ -46,13 +47,14 @@ class BaseModule(ABC):
         logger: ModuleLogger,
         llm_config: LLMConfig,
         permissions: PermissionManager,
+        prompt_assembler: PromptAssembler | None = None,
     ) -> None:
         self.family_prefix = family_prefix
         self.name = name
         self._bus = bus
         self._logger = logger
         self._permissions = permissions
-        self._llm = LLMClient(llm_config, logger)
+        self._llm = LLMClient(llm_config, logger, prompt_assembler=prompt_assembler)
         self._queue = bus.register(self.qualified_name)
 
     @property
@@ -114,8 +116,12 @@ class MainModule(BaseModule):
         logger: ModuleLogger,
         llm_config: LLMConfig,
         permissions: PermissionManager,
+        prompt_assembler: PromptAssembler | None = None,
     ) -> None:
-        super().__init__(family_prefix, "main", bus, logger, llm_config, permissions)
+        super().__init__(
+            family_prefix, "main", bus, logger, llm_config, permissions,
+            prompt_assembler=prompt_assembler,
+        )
         self._message_counter: int = 0
         self._state: ModuleState | str = ModuleState.IDLE
         self._custom_states: set[str] = set()
@@ -270,15 +276,14 @@ class MainModule(BaseModule):
     # and hot-swap path stay in sync. The resolver would read from YAML at boot
     # and validate the same constraints on hot-swap.
 
-    async def change_prompt(self, path: str, requester: FamilyPrefix) -> None:
-        """Change the system prompt file. Requires permission."""
+    async def change_prompt(self, requester: FamilyPrefix) -> None:
+        """Reassemble the system prompt from all sources. Requires permission."""
         if not self._permissions.check(
             requester, PermissionAction.CHANGE_PROMPT, self.family_prefix.value
         ):
             raise PermissionError(
                 f"{requester} lacks CHANGE_PROMPT on {self.family_prefix}"
             )
-        self._llm.update_config(system_prompt_path=path)
         await self._llm.reload_system_prompt()
 
     async def change_model(self, model_name: str, requester: FamilyPrefix) -> None:

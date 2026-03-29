@@ -3,33 +3,40 @@ agent:
   version: 0.1.0
   log_dir: logs
   log_level: DEBUG
+  self_model_path: self.md
+  character_path: character.md
 
 families:
   Re:
     model: gpt-4o
     temperature: 0.7
     max_tokens: 4096
-    prompt: prompts/reaction/re_default.md
+    identity_prompt: prompts/identity/re_identity.md
+    rulebook: reaction/re_rulebook.md
   Pr:
     model: gpt-4o
     temperature: 0.5
     max_tokens: 8192
-    prompt: prompts/prediction/pr_default.md
+    identity_prompt: prompts/identity/pr_identity.md
+    rulebook: prediction/pr_rulebook.md
   Ev:
     model: gpt-4o
     temperature: 0.3
     max_tokens: 4096
-    prompt: prompts/evaluation/ev_default.md
+    identity_prompt: prompts/identity/ev_identity.md
+    rulebook: evaluation/ev_rulebook.md
   Me:
     model: gpt-4o
     temperature: 0.2
     max_tokens: 4096
-    prompt: prompts/memorization/me_default.md
+    identity_prompt: prompts/identity/me_identity.md
+    rulebook: memorization/me_rulebook.md
   Mo:
     model: gpt-4o
     temperature: 0.7
     max_tokens: 2048
-    prompt: prompts/motion/mo_default.md
+    identity_prompt: prompts/identity/mo_identity.md
+    rulebook: motion/mo_rulebook.md
 
 resources:
   max_tokens_per_family: -1

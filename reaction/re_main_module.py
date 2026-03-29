@@ -9,6 +9,7 @@ from interface.llm import LLMConfig
 from interface.logging import ModuleLogger
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
+from interface.prompt_assembler import PromptAssembler
 
 
 class ReactionModule(MainModule):
@@ -26,8 +27,12 @@ class ReactionModule(MainModule):
         logger: ModuleLogger,
         llm_config: LLMConfig,
         permissions: PermissionManager,
+        prompt_assembler: PromptAssembler | None = None,
     ) -> None:
-        super().__init__(FamilyPrefix.Re, bus, logger, llm_config, permissions)
+        super().__init__(
+            FamilyPrefix.Re, bus, logger, llm_config, permissions,
+            prompt_assembler=prompt_assembler,
+        )
 
     async def perceive(self, input_data: dict[str, Any]) -> BusMessage:
         """Process raw input and route it along the appropriate cognition path.

@@ -11,10 +11,13 @@ import aiofiles
 import yaml
 
 from interface.bus import FamilyPrefix, MessageBus
+from interface.character_model import CharacterModel
 from interface.llm import LLMConfig
 from interface.logging import ModuleLogger, setup_logging
+from interface.markdown_utils import parse_markdown_sections
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
+from interface.prompt_assembler import PromptAssembler
 from evaluation.ev_main_module import EvaluationModule
 from memorization.me_main_module import MemorizationModule
 from motion.mo_main_module import MotionModule
@@ -52,7 +55,7 @@ class SelfModel:
             async with aiofiles.open(self._path, "r", encoding="utf-8") as f:
                 content = await f.read()
 
-            self._sections = self._parse_sections(content)
+            self._sections = parse_markdown_sections(content)
             self._logger.action(
                 f"Loaded self.md: {len(self._sections)} sections"
             )
@@ -98,38 +101,21 @@ class SelfModel:
         """Write current sections back to self.md on disk (caller holds lock)."""
         lines: list[str] = []
         for header, body in self._sections.items():
+            if header == "_preamble":
+                lines.append(body.strip() + "\n\n")
+                continue
             lines.append(f"## {header}\n")
             lines.append(body.strip() + "\n\n")
 
         async with aiofiles.open(self._path, "w", encoding="utf-8") as f:
             await f.write("".join(lines))
 
-    @staticmethod
-    def _parse_sections(content: str) -> dict[str, str]:
-        """Split markdown content by ## headers into a dict."""
-        sections: dict[str, str] = {}
-        current_header: str | None = None
-        current_lines: list[str] = []
-
-        for line in content.splitlines(keepends=True):
-            if line.startswith("## "):
-                if current_header is not None:
-                    sections[current_header] = "".join(current_lines)
-                current_header = line[3:].strip()
-                current_lines = []
-            else:
-                current_lines.append(line)
-
-        if current_header is not None:
-            sections[current_header] = "".join(current_lines)
-
-        return sections
-
 
 class TakenokoAgent:
     """Top-level orchestrator that boots and runs all five families.
 
-    Boot sequence: config -> logging -> bus -> permissions -> self_model -> families -> start all.
+    Boot sequence: config -> logging -> bus -> permissions -> self_model
+                   -> character_model -> families (with prompt assemblers) -> start all.
     """
 
     def __init__(self, config_path: str = "admin/yamls/default.yaml") -> None:
@@ -139,6 +125,7 @@ class TakenokoAgent:
         self._bus: MessageBus | None = None
         self._permissions: PermissionManager | None = None
         self._self_model: SelfModel | None = None
+        self._character_model: CharacterModel | None = None
         self._families: dict[FamilyPrefix, MainModule] = {}
 
     async def start(self) -> None:
@@ -164,12 +151,20 @@ class TakenokoAgent:
         self._permissions = PermissionManager(self._logger)
 
         # 5. Self-model
+        self_model_path = agent_cfg.get("self_model_path", "self.md")
         self._self_model = SelfModel(
-            "self.md", self._permissions, self._logger
+            self_model_path, self._permissions, self._logger
         )
         await self._self_model.load_all()
 
-        # 6. Build families
+        # 6. Character model
+        character_path = agent_cfg.get("character_path", "character.md")
+        self._character_model = CharacterModel(
+            character_path, self._permissions, self._logger
+        )
+        await self._character_model.load_all()
+
+        # 7. Build families with prompt assemblers
         family_classes: dict[FamilyPrefix, type[MainModule]] = {
             FamilyPrefix.Re: ReactionModule,
             FamilyPrefix.Pr: PredictionModule,
@@ -180,16 +175,18 @@ class TakenokoAgent:
 
         for prefix, cls in family_classes.items():
             llm_config = self._build_llm_config(prefix)
+            assembler = self._build_prompt_assembler(prefix)
             logger = ModuleLogger(prefix.value, "main")
             module = cls(
                 bus=self._bus,
                 logger=logger,
                 llm_config=llm_config,
                 permissions=self._permissions,
+                prompt_assembler=assembler,
             )
             self._families[prefix] = module
 
-        # 7. Start all families
+        # 8. Start all families
         for module in self._families.values():
             await module.start()
 
@@ -213,7 +210,30 @@ class TakenokoAgent:
             model_name=family_cfg.get("model", "gpt-4o"),
             temperature=family_cfg.get("temperature", 0.7),
             max_tokens=family_cfg.get("max_tokens", 4096),
-            system_prompt_path=family_cfg.get("prompt"),
+        )
+
+    def _build_prompt_assembler(
+        self, family_prefix: FamilyPrefix
+    ) -> PromptAssembler:
+        """Build a PromptAssembler for a given family from config."""
+        families_cfg = self._config.get("families", {})
+        family_cfg = families_cfg.get(family_prefix.value, {})
+        identity_path = family_cfg.get(
+            "identity_prompt",
+            f"prompts/identity/{family_prefix.value.lower()}_identity.md",
+        )
+        rulebook_path = family_cfg.get(
+            "rulebook",
+            f"{family_prefix.value.lower()}/rulebook.md",
+        )
+        logger = ModuleLogger(family_prefix.value, "assembler")
+        return PromptAssembler(
+            family_prefix=family_prefix,
+            identity_path=identity_path,
+            self_model=self._self_model,
+            rulebook_path=rulebook_path,
+            character_model=self._character_model,
+            logger=logger,
         )
 
     async def run(self) -> None:
