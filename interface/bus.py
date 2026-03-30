@@ -150,6 +150,8 @@ class MessageBus:
         self.pause_event: asyncio.Event = asyncio.Event()
         self.pause_event.set()  # start running (not paused)
         self._broadcasts: deque[Broadcast] = deque(maxlen=broadcast_buffer_size)
+        # Optional hook called synchronously in send() for visualization
+        self.viz_hook: Callable[[BusMessage], None] | None = None
 
     def _resolve_maxsize(self, module_name: str) -> int:
         """Resolve queue maxsize for a module."""
@@ -206,6 +208,13 @@ class MessageBus:
                 timecode=message.timecode,
                 trace_id=message.trace_id,
             ))
+
+        # Fire visualization hook (non-blocking, best-effort)
+        if self.viz_hook is not None:
+            try:
+                self.viz_hook(message)
+            except Exception:
+                pass
 
         try:
             self._queues[receiver_name].put_nowait(message)

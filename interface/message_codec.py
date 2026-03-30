@@ -16,10 +16,45 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
 
-from interface.bus import CognitionPath, FamilyPrefix
+from interface.bus import BusMessage, CognitionPath, FamilyPrefix
 from interface.logging import ModuleLogger
+
+
+# Fallback routes: given (incoming_path, receiver_family), infer (response_path, response_target)
+_FALLBACK_ROUTES: dict[
+    tuple[CognitionPath, FamilyPrefix], tuple[CognitionPath, FamilyPrefix]
+] = {
+    (CognitionPath.U, FamilyPrefix.Pr): (CognitionPath.D, FamilyPrefix.Mo),
+    (CognitionPath.P, FamilyPrefix.Pr): (CognitionPath.P, FamilyPrefix.Ev),
+    (CognitionPath.P, FamilyPrefix.Ev): (CognitionPath.P, FamilyPrefix.Pr),
+    (CognitionPath.D, FamilyPrefix.Mo): (CognitionPath.D, FamilyPrefix.Mo),
+    (CognitionPath.E, FamilyPrefix.Ev): (CognitionPath.P, FamilyPrefix.Pr),
+    (CognitionPath.R, FamilyPrefix.Mo): (CognitionPath.R, FamilyPrefix.Mo),
+}
+
+
+def infer_fallback_route(
+    message: BusMessage, self_prefix: FamilyPrefix
+) -> tuple[CognitionPath, FamilyPrefix]:
+    """Infer response route when LLM doesn't specify one.
+
+    Looks up the incoming message's path + receiver in _FALLBACK_ROUTES.
+    Falls back to S-path (self-directed) if no mapping exists.
+    """
+    # Extract path letter from message_id (last char)
+    path_letter = message.message_id[-1]
+    try:
+        incoming_path = CognitionPath(path_letter)
+    except ValueError:
+        return (CognitionPath.S, self_prefix)
+
+    key = (incoming_path, self_prefix)
+    if key in _FALLBACK_ROUTES:
+        return _FALLBACK_ROUTES[key]
+
+    # Default: S-path to self
+    return (CognitionPath.S, self_prefix)
 
 
 @dataclass
@@ -86,7 +121,7 @@ def parse_llm_output(
                 data = json.loads(raw[start:end + 1])
             except json.JSONDecodeError:
                 logger.action(
-                    f"Failed to parse LLM output as JSON",
+                    "Failed to parse LLM output as JSON",
                     data={"raw_preview": raw[:200]},
                 )
                 return ParsedLLMOutput(
@@ -99,7 +134,7 @@ def parse_llm_output(
                 )
         else:
             logger.action(
-                f"No JSON found in LLM output",
+                "No JSON found in LLM output",
                 data={"raw_preview": raw[:200]},
             )
             return ParsedLLMOutput(

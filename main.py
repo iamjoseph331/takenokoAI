@@ -189,7 +189,11 @@ class TakenokoAgent:
             )
             self._families[prefix] = module
 
-        # 8. Start all families
+        # 8. Wire family state callback into each module
+        for module in self._families.values():
+            module._family_state_fn = self.get_family_states
+
+        # 9. Start all families
         for module in self._families.values():
             await module.start()
 
@@ -276,3 +280,10 @@ class TakenokoAgent:
         if prefix not in self._families:
             raise KeyError(f"Family {prefix} not found")
         return self._families[prefix]
+
+    def get_family_states(self) -> dict[str, str]:
+        """Return a snapshot of all family states: {"Re": "IDLE", ...}."""
+        return {
+            prefix.value: str(module.state)
+            for prefix, module in self._families.items()
+        }

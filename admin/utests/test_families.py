@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
-from interface.llm import LLMConfig
 from interface.logging import ModuleLogger
 from interface.modules import MainModule
 from evaluation.ev_main_module import EvaluationModule
@@ -373,3 +372,142 @@ class TestSPath:
     def test_s_path_message_id_format(self):
         msg_id = MessageBus.make_message_id(FamilyPrefix.Pr, 1, CognitionPath.S)
         assert msg_id == "Pr00000001S"
+
+
+# ── Idle detection ──
+
+
+class TestIdleDetection:
+    def test_idle_fields_initialized(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        assert module._idle_streak == 0
+        assert module._self_message_count == 0
+        assert module._sleep_until == 0.0
+        assert module._idle_nudge_threshold == 5.0
+        assert module._max_idle_streak == 5
+        assert module._self_message_budget == 3
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_skips_below_threshold(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        import time
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._last_activity_time = time.monotonic()  # just now
+        await module._handle_idle_tick()
+        assert module._idle_streak == 0  # no nudge fired
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_increments_streak(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        import time
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._last_activity_time = time.monotonic() - 10.0  # idle for 10s
+        module._budget_window_start = time.monotonic()
+        await module._handle_idle_tick()
+        assert module._idle_streak == 1
+        assert module._self_message_count == 1
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_forced_sleep_after_max_streak(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        import time
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._last_activity_time = time.monotonic() - 10.0
+        module._budget_window_start = time.monotonic()
+        module._idle_streak = 5  # at max
+        await module._handle_idle_tick()
+        assert module._idle_streak == 0  # reset
+        assert module._sleep_until > time.monotonic()  # sleeping
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_skips_when_sleeping(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        import time
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._last_activity_time = time.monotonic() - 10.0
+        module._sleep_until = time.monotonic() + 100.0  # sleeping
+        await module._handle_idle_tick()
+        assert module._idle_streak == 0  # no nudge while sleeping
+
+    @pytest.mark.asyncio
+    async def test_idle_tick_respects_budget(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        import time
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._last_activity_time = time.monotonic() - 10.0
+        module._budget_window_start = time.monotonic()
+        module._self_message_count = 3  # budget exhausted
+        await module._handle_idle_tick()
+        assert module._idle_streak == 0  # no nudge
+
+
+# ── Fallback routes ──
+
+
+class TestFallbackRoutes:
+    def test_u_path_to_pr_falls_back_to_d_mo(self):
+        from interface.message_codec import infer_fallback_route
+        msg = BusMessage(
+            message_id="Re00000001U",
+            timecode=1.0,
+            sender=FamilyPrefix.Re,
+            receiver=FamilyPrefix.Pr,
+        )
+        path, receiver = infer_fallback_route(msg, FamilyPrefix.Pr)
+        assert path == CognitionPath.D
+        assert receiver == FamilyPrefix.Mo
+
+    def test_p_path_to_pr_falls_back_to_p_ev(self):
+        from interface.message_codec import infer_fallback_route
+        msg = BusMessage(
+            message_id="Ev00000001P",
+            timecode=1.0,
+            sender=FamilyPrefix.Ev,
+            receiver=FamilyPrefix.Pr,
+        )
+        path, receiver = infer_fallback_route(msg, FamilyPrefix.Pr)
+        assert path == CognitionPath.P
+        assert receiver == FamilyPrefix.Ev
+
+    def test_p_path_to_ev_falls_back_to_p_pr(self):
+        from interface.message_codec import infer_fallback_route
+        msg = BusMessage(
+            message_id="Pr00000001P",
+            timecode=1.0,
+            sender=FamilyPrefix.Pr,
+            receiver=FamilyPrefix.Ev,
+        )
+        path, receiver = infer_fallback_route(msg, FamilyPrefix.Ev)
+        assert path == CognitionPath.P
+        assert receiver == FamilyPrefix.Pr
+
+    def test_unknown_route_falls_back_to_s_self(self):
+        from interface.message_codec import infer_fallback_route
+        msg = BusMessage(
+            message_id="Me00000001D",
+            timecode=1.0,
+            sender=FamilyPrefix.Pr,
+            receiver=FamilyPrefix.Me,
+        )
+        path, receiver = infer_fallback_route(msg, FamilyPrefix.Me)
+        assert path == CognitionPath.S
+        assert receiver == FamilyPrefix.Me
+
+
+# ── Family state query ──
+
+
+class TestFamilyStates:
+    def test_get_family_states_without_callback(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        states = module._get_family_states()
+        assert states == {"Ev": "IDLE"}
+
+    def test_get_family_states_with_callback(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._family_state_fn = lambda: {"Re": "IDLE", "Pr": "THINKING", "Ev": "IDLE", "Me": "IDLE", "Mo": "IDLE"}
+        states = module._get_family_states()
+        assert len(states) == 5
+        assert states["Pr"] == "THINKING"
+
+    def test_broadcast_context_includes_states(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        module._family_state_fn = lambda: {"Re": "IDLE", "Pr": "IDLE"}
+        ctx = module._build_broadcast_context()
+        assert "Family states:" in ctx
+        assert "Re=IDLE" in ctx

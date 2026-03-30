@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TakenokoAI Visualizer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d1117; color: #e6edf3;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+}
+
+/* ── Top bar ── */
+#topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 16px; background: #161b22;
+  border-bottom: 1px solid #30363d; flex-shrink: 0;
+  font-size: 12px;
+}
+#conn-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #da3633; transition: background 0.3s;
+}
+#conn-dot.ok { background: #3fb950; }
+#conn-label { color: #8b949e; }
+#title-label { color: #a5d6ff; flex: 1; font-weight: bold; }
+.stat { color: #8b949e; }
+.stat span { color: #e6edf3; }
+
+/* ── Main area ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Graph panel ── */
+#graph-panel { flex: 1; position: relative; overflow: hidden; }
+#graph-svg { width: 100%; height: 100%; }
+
+/* ── Right panel ── */
+#right-panel {
+  width: 340px; background: #161b22;
+  border-left: 1px solid #30363d;
+  display: flex; flex-direction: column;
+  overflow: hidden; flex-shrink: 0;
+}
+#right-panel > h3 {
+  padding: 10px 14px; font-size: 11px; color: #8b949e;
+  text-transform: uppercase; letter-spacing: 1px;
+  border-bottom: 1px solid #30363d; flex-shrink: 0;
+}
+#msg-feed {
+  flex: 1; overflow-y: auto; padding: 4px 0;
+  font-size: 10.5px; line-height: 1.6; min-height: 0;
+}
+#msg-feed::-webkit-scrollbar { width: 4px; }
+#msg-feed::-webkit-scrollbar-thumb { background: #30363d; }
+.feed-entry {
+  padding: 2px 12px;
+  border-left: 2px solid transparent;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: default;
+}
+.feed-entry:hover { background: #1c2128; }
+.feed-entry.is-ack { opacity: 0.35; }
+.feed-entry.new { animation: flash 0.4s ease-out; }
+@keyframes flash { from { background: #1f2937; } to { background: transparent; } }
+
+/* ── Broadcasts strip ── */
+#broadcast-strip {
+  flex-shrink: 0; background: #0d1117;
+  border-top: 1px solid #30363d;
+  max-height: 120px; overflow-y: auto;
+  padding: 4px 0;
+}
+#broadcast-strip h4 {
+  padding: 4px 12px; font-size: 10px; color: #6e7681;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.bc-entry {
+  padding: 1px 12px; font-size: 10px; color: #8b949e;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bc-entry .bc-sender { color: #58a6ff; }
+
+/* ── Graph styles ── */
+.node-circle {
+  stroke-width: 2;
+  transition: filter 0.15s;
+}
+.node-circle.pulse {
+  filter: drop-shadow(0 0 14px var(--node-color));
+}
+.node-label {
+  fill: white; font-size: 13px; font-weight: bold;
+  text-anchor: middle; dominant-baseline: middle;
+  pointer-events: none; user-select: none;
+}
+.node-sub {
+  fill: #8b949e; font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none; user-select: none;
+}
+.state-badge {
+  fill: #3fb950; font-size: 8px; font-weight: bold;
+  text-anchor: middle;
+  pointer-events: none; user-select: none;
+}
+.state-badge.thinking { fill: #f0c040; }
+.queue-badge circle { fill: #da3633; stroke: #0d1117; stroke-width: 1.5; }
+.queue-badge text {
+  fill: white; font-size: 9px; font-weight: bold;
+  text-anchor: middle; dominant-baseline: middle;
+}
+.queue-badge { display: none; }
+.queue-badge.visible { display: block; }
+
+/* ── Edges ── */
+.edge-bg {
+  stroke: #30363d; stroke-width: 1.5;
+  fill: none; opacity: 0.5;
+  marker-end: url(#arrow-gray);
+}
+.edge-flash {
+  stroke-width: 3; fill: none; opacity: 0;
+  pointer-events: none;
+  stroke-dasharray: 200;
+  marker-end: url(#arrow-active);
+}
+.edge-flash.active {
+  animation: edgePulse 0.8s ease-out forwards;
+}
+@keyframes edgePulse {
+  0%   { opacity: 0.95; stroke-dashoffset: 200; }
+  60%  { opacity: 0.9;  stroke-dashoffset: 0; }
+  100% { opacity: 0;    stroke-dashoffset: 0; }
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="conn-dot"></div>
+  <span id="conn-label">Disconnected</span>
+  <span id="title-label">TakenokoAI</span>
+  <span class="stat">Uptime: <span id="stat-uptime">0s</span></span>
+  <span class="stat">Messages: <span id="stat-msgs">0</span></span>
+</div>
+
+<div id="main">
+  <div id="graph-panel">
+    <svg id="graph-svg"></svg>
+  </div>
+
+  <div id="right-panel">
+    <h3>Message Feed <small style="font-weight:normal;color:#6e7681;text-transform:none;letter-spacing:0;font-size:9px">(acks dimmed)</small></h3>
+    <div id="msg-feed"></div>
+    <div id="broadcast-strip">
+      <h4>Broadcasts</h4>
+      <div id="bc-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const WS_URL = 'ws://localhost:7899/ws';
+const MAX_FEED = 100;
+
+// ── Family definitions (positions for ~700×450 viewport) ──
+const FAMILIES = [
+  { id: "Re", label: "Re",  desc: "Reaction",    color: "#e3b341", x: 160, y: 225 },
+  { id: "Pr", label: "Pr",  desc: "Prediction",  color: "#58a6ff", x: 380, y: 140 },
+  { id: "Ev", label: "Ev",  desc: "Evaluation",  color: "#ff7b72", x: 580, y: 225 },
+  { id: "Me", label: "Me",  desc: "Memorization",color: "#c9d1d9", x: 380, y: 360 },
+  { id: "Mo", label: "Mo",  desc: "Motion",      color: "#3fb950", x: 580, y: 360 },
+];
+
+const FAM_MAP = {};
+FAMILIES.forEach(f => FAM_MAP[f.id] = f);
+
+// Cognition path edges (all directed)
+const EDGES = [
+  // P path
+  { src:"Ev", dst:"Pr" }, { src:"Pr", dst:"Ev" },
+  { src:"Ev", dst:"Mo" }, { src:"Ev", dst:"Me" },
+  // R path
+  { src:"Re", dst:"Mo" },
+  // E path
+  { src:"Re", dst:"Ev" },
+  // U path
+  { src:"Re", dst:"Pr" },
+  // D path
+  { src:"Pr", dst:"Re" }, { src:"Pr", dst:"Mo" }, { src:"Pr", dst:"Me" },
+];
+
+// Path letter → color
+const PATH_COLORS = {
+  P: "#58a6ff", R: "#e3b341", E: "#ff7b72",
+  U: "#d2a8ff", D: "#3fb950", S: "#8b949e",
+};
+
+// ── D3 setup ──
+const svg = d3.select("#graph-svg");
+let W = 700, H = 450;
+
+function resize() {
+  const panel = document.getElementById("graph-panel");
+  W = panel.clientWidth; H = panel.clientHeight;
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  // Reposition nodes proportionally
+  FAMILIES.forEach(f => {
+    const baseX = f.x / 700, baseY = f.y / 450;
+    f.cx = baseX * W; f.cy = baseY * H;
+  });
+}
+resize();
+window.addEventListener("resize", () => { resize(); renderGraph(); });
+
+const defs = svg.append("defs");
+defs.append("marker").attr("id","arrow-gray")
+  .attr("markerWidth",8).attr("markerHeight",8)
+  .attr("refX",22).attr("refY",3).attr("orient","auto")
+  .append("path").attr("d","M0,0 L0,6 L8,3 z").attr("fill","#30363d");
+
+defs.append("marker").attr("id","arrow-active")
+  .attr("markerWidth",8).attr("markerHeight",8)
+  .attr("refX",22).attr("refY",3).attr("orient","auto")
+  .append("path").attr("d","M0,0 L0,6 L8,3 z").attr("fill","#58a6ff");
+
+const g = svg.append("g");
+
+// Draw static edge backgrounds
+function edgeKey(e) { return `${e.src}-${e.dst}`; }
+function getPos(id) { const f = FAM_MAP[id]; return { x: f.cx, y: f.cy }; }
+
+function lineCoords(src, dst, offset) {
+  const s = getPos(src), d = getPos(dst);
+  const dx = d.x - s.x, dy = d.y - s.y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const R = 26; // node radius
+  const ox = offset ? (dy/len)*4 : 0;
+  const oy = offset ? -(dx/len)*4 : 0;
+  return {
+    x1: s.x + (dx/len)*R + ox, y1: s.y + (dy/len)*R + oy,
+    x2: d.x - (dx/len)*R + ox, y2: d.y - (dy/len)*R + oy,
+  };
+}
+
+// Check for bidirectional pairs to offset parallel edges
+const edgeSet = new Set(EDGES.map(e => edgeKey(e)));
+function isBidi(e) { return edgeSet.has(`${e.dst}-${e.src}`); }
+
+const edgeBgGroup = g.append("g").attr("class","edge-bgs");
+const edgeFlashGroup = g.append("g").attr("class","edge-flashes");
+const nodeGroup = g.append("g").attr("class","nodes");
+
+function renderGraph() {
+  // Static edges
+  edgeBgGroup.selectAll(".edge-bg")
+    .data(EDGES, edgeKey)
+    .join("line")
+    .attr("class","edge-bg")
+    .each(function(e) {
+      const c = lineCoords(e.src, e.dst, isBidi(e));
+      d3.select(this)
+        .attr("x1",c.x1).attr("y1",c.y1)
+        .attr("x2",c.x2).attr("y2",c.y2);
+    });
+
+  // Flash lines (invisible until animated)
+  edgeFlashGroup.selectAll(".edge-flash")
+    .data(EDGES, edgeKey)
+    .join("line")
+    .attr("class","edge-flash")
+    .each(function(e) {
+      const c = lineCoords(e.src, e.dst, isBidi(e));
+      d3.select(this)
+        .attr("x1",c.x1).attr("y1",c.y1)
+        .attr("x2",c.x2).attr("y2",c.y2)
+        .attr("data-src", e.src)
+        .attr("data-dst", e.dst);
+    });
+
+  // Nodes
+  const nodeSel = nodeGroup.selectAll(".node")
+    .data(FAMILIES, d => d.id)
+    .join(enter => {
+      const ng = enter.append("g").attr("class","node");
+      ng.append("circle").attr("class","node-circle").attr("r", 26);
+      ng.append("text").attr("class","node-label").attr("dy","0.05em");
+      ng.append("text").attr("class","node-sub").attr("dy","2.4em");
+      ng.append("text").attr("class","state-badge").attr("dy","-2em");
+      const qb = ng.append("g").attr("class","queue-badge");
+      qb.append("circle").attr("r",8).attr("cx",18).attr("cy",-18);
+      qb.append("text").attr("x",18).attr("y",-18);
+      return ng;
+    });
+
+  nodeGroup.selectAll(".node").each(function(f) {
+    const ng = d3.select(this);
+    ng.attr("transform", `translate(${f.cx},${f.cy})`);
+    ng.select(".node-circle")
+      .attr("fill", f.color + "22")
+      .attr("stroke", f.color)
+      .style("--node-color", f.color);
+    ng.select(".node-label").text(f.label).attr("fill", f.color);
+    ng.select(".node-sub").text(f.desc);
+    ng.select(".state-badge").text(familyStates[f.id] || "IDLE")
+      .classed("thinking", (familyStates[f.id] || "IDLE") === "THINKING");
+
+    const depth = queueDepths[f.id] || 0;
+    const qb = ng.select(".queue-badge");
+    qb.classed("visible", depth > 0);
+    qb.select("text").text(depth);
+  });
+}
+
+// ── State ──
+let familyStates = { Re:"IDLE", Pr:"IDLE", Ev:"IDLE", Me:"IDLE", Mo:"IDLE" };
+let queueDepths  = { Re:0, Pr:0, Ev:0, Me:0, Mo:0 };
+let msgCount = 0;
+
+// ── Flash edge ──
+function flashEdge(src, dst, pathLetter) {
+  const color = PATH_COLORS[pathLetter] || "#58a6ff";
+  // Inject/update arrow marker color
+  defs.select("#arrow-active path").attr("fill", color);
+  edgeFlashGroup.selectAll(".edge-flash")
+    .filter(function() {
+      return this.getAttribute("data-src") === src &&
+             this.getAttribute("data-dst") === dst;
+    })
+    .each(function() {
+      const el = d3.select(this);
+      el.attr("stroke", color)
+        .classed("active", false);
+      void this.offsetWidth; // reflow
+      el.classed("active", true);
+    });
+
+  // Pulse node
+  nodeGroup.selectAll(".node")
+    .filter(d => d.id === src || d.id === dst)
+    .select(".node-circle")
+    .classed("pulse", true);
+  setTimeout(() => {
+    nodeGroup.selectAll(".node-circle").classed("pulse", false);
+  }, 600);
+}
+
+// ── Message feed ──
+const feedEl = document.getElementById("msg-feed");
+function addFeedEntry(ev) {
+  if (feedEl.children.length >= MAX_FEED) {
+    feedEl.removeChild(feedEl.firstChild);
+  }
+  const pathColor = PATH_COLORS[ev.path] || "#8b949e";
+  const div = document.createElement("div");
+  div.className = "feed-entry new" + (ev.is_ack ? " is-ack" : "");
+  div.style.borderLeftColor = pathColor;
+  const route = `<span style="color:${pathColor}">${ev.src}→${ev.dst}[${ev.path}]</span>`;
+  const summary = ev.summary ? ` <span style="color:#8b949e">${escHtml(ev.summary.slice(0,60))}</span>` : "";
+  div.innerHTML = `${route}${summary}`;
+  feedEl.appendChild(div);
+  feedEl.scrollTop = feedEl.scrollHeight;
+}
+
+// ── Broadcasts ──
+const bcList = document.getElementById("bc-list");
+function updateBroadcasts(broadcasts) {
+  bcList.innerHTML = "";
+  [...broadcasts].reverse().slice(0, 8).forEach(b => {
+    const div = document.createElement("div");
+    div.className = "bc-entry";
+    div.innerHTML = `<span class="bc-sender">[${escHtml(b.sender)}]</span> ${escHtml(b.summary)}`;
+    bcList.appendChild(div);
+  });
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ── WebSocket ──
+let ws, reconnectTimer;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    document.getElementById("conn-dot").classList.add("ok");
+    document.getElementById("conn-label").textContent = "Connected";
+    renderGraph();
+  };
+
+  ws.onclose = () => {
+    document.getElementById("conn-dot").classList.remove("ok");
+    document.getElementById("conn-label").textContent = "Reconnecting...";
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = e => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+
+    if (ev.type === "ping") return;
+
+    if (ev.type === "msg") {
+      msgCount++;
+      document.getElementById("stat-msgs").textContent = msgCount;
+      addFeedEntry(ev);
+      if (!ev.is_ack && FAM_MAP[ev.src] && FAM_MAP[ev.dst]) {
+        flashEdge(ev.src, ev.dst, ev.path);
+      }
+    }
+
+    if (ev.type === "snapshot") {
+      if (ev.states)       familyStates = ev.states;
+      if (ev.queue_depths) queueDepths  = ev.queue_depths;
+      if (ev.broadcasts)   updateBroadcasts(ev.broadcasts);
+      if (ev.uptime != null) {
+        document.getElementById("stat-uptime").textContent = ev.uptime + "s";
+      }
+      renderGraph();
+    }
+  };
+}
+
+// ── Init ──
+renderGraph();
+connect();
+</script>
+</body>
+</html>

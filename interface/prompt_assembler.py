@@ -1,10 +1,11 @@
 """Prompt assembler — builds multi-part system prompts for each family module.
 
-Concatenates four components wrapped in XML tags into a single system message:
-  1. ``<identity>``  — short, static role description
-  2. ``<self-model>`` — the full ``self.md`` (system awareness)
-  3. ``<rulebook>``  — family-specific operational rules
-  4. ``<character>`` — personality traits (Core + family section)
+Concatenates five components wrapped in XML tags into a single system message:
+  1. ``<identity>``      — short, static role description
+  2. ``<self-model>``    — the full ``self.md`` (system awareness)
+  3. ``<rulebook>``      — family-specific operational rules
+  4. ``<character>``     — personality traits (Core + family section)
+  5. ``<output-format>`` — required JSON output format for LLM responses
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import aiofiles
 
 from interface.bus import FamilyPrefix
 from interface.logging import ModuleLogger
+from interface.message_codec import FORMAT_INSTRUCTIONS
 
 if TYPE_CHECKING:
     from interface.character_model import CharacterModel
@@ -72,6 +74,9 @@ class PromptAssembler:
             parts.append(self._wrap("rulebook", rulebook))
         if character:
             parts.append(self._wrap("character", character))
+
+        # Output format instructions (always included)
+        parts.append(self._wrap("output-format", FORMAT_INSTRUCTIONS))
 
         self._assembled_cache = "\n\n".join(parts)
         self._logger.action(

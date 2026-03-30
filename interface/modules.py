@@ -7,10 +7,11 @@ and attach to their parent MainModule at runtime via the self-registration proto
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from interface.bus import (
     BusMessage,
@@ -141,6 +142,20 @@ class MainModule(BaseModule):
         self._pause_event: asyncio.Event = asyncio.Event()
         self._pause_event.set()  # not paused by default
         self._pause_response_queue: asyncio.Queue[str] = asyncio.Queue()
+
+        # Family state query callback (set by orchestrator after boot)
+        self._family_state_fn: Callable[[], dict[str, str]] | None = None
+
+        # S-path idle detection
+        self._last_activity_time: float = time.monotonic()
+        self._idle_streak: int = 0
+        self._sleep_until: float = 0.0
+        self._idle_nudge_threshold: float = 5.0   # seconds before first nudge
+        self._max_idle_streak: int = 5             # consecutive nudges before forced sleep
+        self._self_message_budget: int = 3         # max self-messages per budget window
+        self._self_message_count: int = 0
+        self._budget_window_start: float = 0.0
+        self._budget_window_seconds: float = 60.0
 
     # ── Message ID generation ──
 
@@ -338,15 +353,29 @@ class MainModule(BaseModule):
             if not was_paused:
                 self._pause_event.set()  # resume
 
-    # ── Broadcast context helper ──
+    # ── Context helpers ──
+
+    def _get_family_states(self) -> dict[str, str]:
+        """Query all family states via the orchestrator callback."""
+        if self._family_state_fn is not None:
+            return self._family_state_fn()
+        return {self.family_prefix.value: str(self._state)}
 
     def _build_broadcast_context(self) -> str:
-        """Build a string of recent broadcasts for inclusion in LLM context."""
+        """Build a string of recent broadcasts + family states for LLM context."""
+        parts: list[str] = []
+
         broadcasts = self._bus.get_recent_broadcasts(5)
-        if not broadcasts:
-            return ""
-        lines = [f"[{b.sender}] {b.summary}" for b in broadcasts]
-        return "Recent activity:\n" + "\n".join(lines)
+        if broadcasts:
+            lines = [f"[{b.sender}] {b.summary}" for b in broadcasts]
+            parts.append("Recent activity:\n" + "\n".join(lines))
+
+        states = self._get_family_states()
+        if states:
+            state_str = ", ".join(f"{k}={v}" for k, v in states.items())
+            parts.append(f"Family states: {state_str}")
+
+        return "\n".join(parts)
 
     # ── Message loop (template method pattern) ──
 
@@ -355,16 +384,20 @@ class MainModule(BaseModule):
 
         Subclasses override _handle_message() for processing logic
         and optionally _on_idle() for S-path behavior.
+
+        Uses adaptive timeout: 1s when active, 5s when idle (saves CPU).
         """
         self._logger.action(f"_message_loop started for {self.qualified_name}")
+        self._last_activity_time = time.monotonic()
         while self._running:
             await self._pause_event.wait()
+            timeout = 5.0 if self._idle_streak > 0 else IDLE_TIMEOUT_S
             try:
                 message = await self._bus.receive(
-                    self.qualified_name, timeout=IDLE_TIMEOUT_S
+                    self.qualified_name, timeout=timeout
                 )
             except (TimeoutError, asyncio.TimeoutError):
-                await self._on_idle()
+                await self._handle_idle_tick()
                 continue
 
             if message.is_ack:
@@ -372,6 +405,10 @@ class MainModule(BaseModule):
                     f"ACK received: {message.message_id}"
                 )
                 continue
+
+            # Real message — reset idle state
+            self._last_activity_time = time.monotonic()
+            self._idle_streak = 0
 
             await self.send_ack(message)
             await self.set_state(ModuleState.THINKING)
@@ -389,12 +426,62 @@ class MainModule(BaseModule):
         """Process a single incoming message. Subclasses must implement."""
         raise NotImplementedError
 
-    async def _on_idle(self) -> None:
+    async def _handle_idle_tick(self) -> None:
         """Called when no message arrives within the timeout.
 
-        Default: do nothing. Override for S-path behavior (Stage 2).
+        Implements S-path idle detection with budgeting:
+        - Waits until idle_nudge_threshold before first nudge
+        - Limits self-messages per budget window
+        - Forces sleep after max_idle_streak consecutive nudges
         """
-        pass
+        now = time.monotonic()
+        idle_duration = now - self._last_activity_time
+
+        # Skip if sleeping
+        if now < self._sleep_until:
+            return
+
+        # Skip if below threshold
+        if idle_duration < self._idle_nudge_threshold:
+            return
+
+        # Reset budget window if expired
+        if now - self._budget_window_start > self._budget_window_seconds:
+            self._self_message_count = 0
+            self._budget_window_start = now
+
+        # Skip if budget exhausted
+        if self._self_message_count >= self._self_message_budget:
+            return
+
+        # Forced sleep after max streak
+        if self._idle_streak >= self._max_idle_streak:
+            self._sleep_until = now + self._budget_window_seconds
+            self._idle_streak = 0
+            self._logger.action(
+                f"Forced sleep for {self._budget_window_seconds}s "
+                f"after {self._max_idle_streak} idle nudges"
+            )
+            return
+
+        self._idle_streak += 1
+        self._self_message_count += 1
+
+        # Call the overridable idle hook
+        await self._on_idle(idle_duration)
+
+    async def _on_idle(self, idle_duration: float) -> None:
+        """Called when idle detection triggers.
+
+        Override in subclasses for S-path behavior (self-directed thought).
+        Default: log and do nothing.
+
+        Args:
+            idle_duration: Seconds since last real message was processed.
+        """
+        self._logger.action(
+            f"Idle nudge #{self._idle_streak} ({idle_duration:.1f}s idle)"
+        )
 
     async def start(self) -> None:
         self._running = True

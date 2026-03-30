@@ -38,6 +38,7 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [x] Fix `MotionModule.get_output()` method
 - [x] `.gitignore` for logs/ and *.egg-info/
 - [x] PromptAssembler: load only Agent + own-family section of self.md
+- [x] PromptAssembler: 5th section `<output-format>` auto-appended from FORMAT_INSTRUCTIONS
 - [ ] Create `admin/visualization_app.py` or remove viz references from `run_agent.py`
 - [ ] Create `.claude/lessons.md` for development learnings
 - [ ] Make message counter persistent across restarts (save/load from file or self.md)
@@ -55,12 +56,16 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [x] Broadcast circular buffer in MessageBus
 - [x] `BusMessage.summary` and `is_broadcast` fields
 - [x] `MessageBus.add_broadcast()`, `get_recent_broadcasts()`
-- [x] `_build_broadcast_context()` helper on MainModule for LLM context injection
+- [x] `_build_broadcast_context()` helper on MainModule for LLM context injection (now includes family states)
 
-### Done — S-Path
+### Done — S-Path & Idle Detection
 
 - [x] `CognitionPath.S` in enum and VALID_PATH_ROUTES (sender == receiver for all families)
-- [x] `_on_idle()` hook in message loop template (default no-op, override for Stage 2)
+- [x] `_on_idle()` hook in message loop template (override for family-specific idle behavior)
+- [x] Idle detection with budget system: nudge threshold, streak tracking, forced sleep, budget window
+- [x] Adaptive timeout in message loop: 1s active, 5s idle (CPU savings)
+- [x] Fallback route inference (`infer_fallback_route`) when LLM doesn't specify routing
+- [x] Family state query callback (`_family_state_fn`) wired from orchestrator
 
 ### Done — Message Loop Template
 
@@ -89,13 +94,13 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ### Done — Testing
 
-- [x] 38 tests passing (family behavior, MessageCodec, broadcasts, S-path)
+- [x] 51 tests passing (family behavior, MessageCodec, broadcasts, S-path, idle detection, fallback routes, family states)
 - [x] Injectable completion_fn enables all tests without LLM API
 
 ### To Do — Context & Conversation
 
 - [ ] Context window manager — maintain conversation history within each module
-- [ ] Auto-populate message context (parent body summary, family states) without LLM involvement
+- [~] Auto-populate message context (family states done via callback; parent body summary still manual)
 - [ ] Attach "last N broadcasts" as context when processing messages (currently built but not automatically injected into every LLM call)
 
 ### To Do — Testing & Evaluation Harness
@@ -124,7 +129,9 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Me short-term memory: scoped to session/game with auto-expiry
 - [ ] Self-evaluation: agent examines its own performance after each game
 - [ ] 申告制 (Self-Registration): implement full announce → update self.md → broadcast flow
-- [ ] S-path idle detection: timer-based wake-up per module (resource-aware, suppressible)
+- [x] S-path idle detection: timer-based wake-up per module (resource-aware, suppressible) — moved to Stage 1
+- [ ] S-path per-family idle prompts: tune what each family does when idle (e.g., Mo fidgets, Pr strategizes)
+- [ ] S-path budget tuning: make thresholds configurable via YAML
 - [ ] Broadcast storage revision (currently Option A, may need to change)
 
 ---

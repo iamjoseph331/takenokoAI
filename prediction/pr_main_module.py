@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output
+from interface.message_codec import FORMAT_INSTRUCTIONS, infer_fallback_route, parse_llm_output
 from interface.modules import MainModule
 from interface.permissions import PermissionAction, PermissionManager
 from interface.prompt_assembler import PromptAssembler
@@ -126,13 +125,16 @@ class PredictionModule(MainModule):
                 summary=parsed.summary or f"<Pr> responding to <{message.sender.value}>",
             )
         elif parsed.body:
-            # LLM didn't specify routing — default: send plan to Ev for validation
+            # LLM didn't specify routing — infer from message context
+            fallback_path, fallback_receiver = infer_fallback_route(
+                message, FamilyPrefix.Pr
+            )
             await self.send_message(
-                receiver=FamilyPrefix.Ev,
+                receiver=fallback_receiver,
                 body={"plan": parsed.body},
-                path=CognitionPath.P,
-                context=f"Pr plan for validation (from {message.message_id})",
+                path=fallback_path,
+                context=f"Pr response (fallback route from {message.message_id})",
                 parent_message_id=message.message_id,
                 trace_id=message.trace_id,
-                summary=parsed.summary or f"<Pr> sending plan to <Ev> for validation",
+                summary=parsed.summary or f"<Pr> sending plan to <{fallback_receiver.value}>",
             )

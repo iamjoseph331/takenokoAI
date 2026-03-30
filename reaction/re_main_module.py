@@ -111,6 +111,6 @@ class ReactionModule(MainModule):
             await self.perceive(body.get("data", {}))
         else:
             self._logger.action(
-                f"Re received unrecognized message",
+                "Re received unrecognized message",
                 data={"body_preview": str(body)[:200]},
             )
