@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from interface.bus import FamilyPrefix, MessageBus
-from interface.llm import LLMConfig
+from interface.bus import BusMessage, FamilyPrefix, MessageBus
+from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
@@ -29,10 +29,12 @@ class MotionModule(MainModule):
         llm_config: LLMConfig,
         permissions: PermissionManager,
         prompt_assembler: PromptAssembler | None = None,
+        completion_fn: CompletionFn | None = None,
     ) -> None:
         super().__init__(
             FamilyPrefix.Mo, bus, logger, llm_config, permissions,
             prompt_assembler=prompt_assembler,
+            completion_fn=completion_fn,
         )
         self._output_queue: asyncio.Queue[str] = asyncio.Queue()
 
@@ -41,52 +43,62 @@ class MotionModule(MainModule):
     ) -> dict[str, Any]:
         """Produce speech/text output on a channel.
 
-        Args:
-            content: What to say.
-            channel: Output channel identifier.
-
-        Returns:
-            Result dict with delivery status.
+        Puts the content into the output queue for the chat loop to collect.
         """
-        raise NotImplementedError(
-            "speak: output content to the specified channel"
+        self._logger.action(
+            f"speak [{channel}]: {content[:100]}",
+            data={"channel": channel, "length": len(content)},
         )
+        await self._output_queue.put(content)
+        return {"status": "delivered", "channel": channel, "length": len(content)}
 
     async def do(
         self, action: str, *, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Execute a physical/game action.
+        """Execute a game/physical action.
 
-        Args:
-            action: Action identifier (e.g. "play_card", "place_mark").
-            params: Action-specific parameters.
-
-        Returns:
-            Result dict with action outcome.
+        Stage 1: log the action and put a description in the output queue.
         """
-        raise NotImplementedError(
-            "do: execute action with params, return outcome"
+        result_text = f"[Action: {action}]"
+        if params:
+            result_text += f" params={params}"
+        self._logger.action(
+            f"do: {action}",
+            data={"params": params},
         )
+        await self._output_queue.put(result_text)
+        return {"status": "executed", "action": action, "params": params}
 
     async def get_output(self, *, timeout: float = 30.0) -> str:
         """Wait for and return the next output produced by this module.
 
         Used by the chat loop in run_agent.py to collect responses.
-        Raises TimeoutError if no output is available within the timeout.
         """
         return await asyncio.wait_for(self._output_queue.get(), timeout=timeout)
 
-    async def _message_loop(self) -> None:
-        """Listen for action directives from Re, Ev, and Pr."""
-        raise NotImplementedError("MotionModule._message_loop")
+    async def _handle_message(self, message: BusMessage) -> None:
+        """Handle action directives from Re, Ev, and Pr."""
+        body = message.body or {}
 
-    async def get_resources(self) -> dict[str, Any]:
-        raise NotImplementedError("MotionModule.get_resources")
+        if isinstance(body, dict):
+            # Check for explicit action
+            action = body.get("action")
+            if action and action not in ("store",):
+                params = {k: v for k, v in body.items() if k != "action"}
+                await self.do(action, params=params)
+                return
 
-    async def get_limits(self) -> dict[str, Any]:
-        raise NotImplementedError("MotionModule.get_limits")
+            # Check for plan text to speak
+            plan = body.get("plan")
+            if plan:
+                await self.speak(str(plan))
+                return
 
-    async def pause_and_answer(
-        self, question: str, requester: FamilyPrefix
-    ) -> str:
-        raise NotImplementedError("MotionModule.pause_and_answer")
+            # Check for plain text
+            text = body.get("text")
+            if text:
+                await self.speak(str(text))
+                return
+
+        # Fallback: convert entire body to text and speak it
+        await self.speak(str(body))
