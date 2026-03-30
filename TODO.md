@@ -6,12 +6,10 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ## Stage 0: Foundation (Infrastructure)
 
-### Done
-
 - [x] Project structure: five family dirs, interface/, admin/, prompts/
 - [x] `MessageBus` with bounded queues, backpressure (`QueueFullSignal`), pause/resume
 - [x] `BusMessage` Pydantic model with message ID format validation
-- [x] Cognition path definitions (P, R, E, U, D) and route validation
+- [x] Cognition path definitions (P, R, E, U, D, S) and route validation
 - [x] `MainModule` / `SubModule` base classes with state machine, submodule registry
 - [x] `LLMClient` wrapping litellm (supports OpenAI, Anthropic, Ollama)
 - [x] `LLMConfig` dataclass with hot-swap via `update_config()`
@@ -30,71 +28,75 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [x] Message counter per family for ID generation
 - [x] Markdown section parser (`markdown_utils.py`)
 - [x] API key environment variable mapping for litellm
-- [x] Test stubs for all five family modules (`test_families.py`)
-
-### To Do
-
-- [ ] Create `conftest.py` with `mock_bus`, `mock_logger`, `mock_llm_config`, `mock_permissions` fixtures
-- [ ] Add `fastapi` and `uvicorn` to `pyproject.toml` as optional dependencies
-- [ ] Create initial `self.md` with agent-level and per-family sections
-- [ ] Create missing rulebooks: `re_rulebook.md`, `ev_rulebook.md`, `me_rulebook.md`, `mo_rulebook.md`
-- [ ] Create `README.md` with project overview and quickstart
+- [x] `conftest.py` with `mock_bus`, `mock_logger`, `mock_llm_config`, `mock_permissions` fixtures
+- [x] `fastapi` and `uvicorn` in `pyproject.toml` as optional `[debug]` dependencies
+- [x] Initial `self.md` with agent-level and per-family sections
+- [x] Rulebooks: `re_rulebook.md`, `ev_rulebook.md`, `me_rulebook.md`, `mo_rulebook.md`
+- [x] `README.md` with project overview and quickstart
+- [x] LLM call timeout wrapper (asyncio.wait_for)
+- [x] Injectable `completion_fn` on `LLMClient` for testing without API keys
+- [x] Fix `MotionModule.get_output()` method
+- [x] `.gitignore` for logs/ and *.egg-info/
+- [x] PromptAssembler: load only Agent + own-family section of self.md
 - [ ] Create `admin/visualization_app.py` or remove viz references from `run_agent.py`
-- [ ] Add LLM call timeout wrapper (asyncio.wait_for around litellm calls)
-- [ ] Add `completion_fn` injection to `LLMClient` for testing without API keys
-- [ ] Fix `run_agent.py` — `MotionModule` has no `get_output()` method
 - [ ] Create `.claude/lessons.md` for development learnings
-- [!] Decide: should route validation be enforced or advisory? (see DESIGN_REVIEW.md Q10)
-- [!] DRY: extract `MarkdownDocumentModel` base from `SelfModel`/`CharacterModel`
 - [ ] Make message counter persistent across restarts (save/load from file or self.md)
 - [ ] Add `PermissionAction.WRITE_CHARACTER_MD` distinct from `WRITE_SELF_MD`
-- [ ] PromptAssembler: load only agent + own-family sections of self.md, not the entire document
+- [!] DRY: extract `MarkdownDocumentModel` base from `SelfModel`/`CharacterModel`
 
 ---
 
 ## Stage 1: Core Cognitive Loop
 
-### To Do — Message System
+### Done — Message System
 
-- [ ] Design LLM output format: `{body, path, receiver, summary}` — see notes line 159–163
-- [ ] Build `MessageCodec` in base class to parse LLM output → `BusMessage` + broadcast
-- [ ] Implement broadcast message queue (circular buffer in bus or per-family)
-- [ ] Add `BusMessage.is_broadcast` field and broadcast delivery mechanism
-- [ ] Attach "last N broadcasts" as context when processing messages
-- [ ] Auto-populate message context (parent body summary, family states) without LLM involvement
+- [x] `MessageCodec` — parse LLM JSON output into `(body, path, receiver, summary)`
+- [x] `FORMAT_INSTRUCTIONS` prompt template for LLM structured output
+- [x] Broadcast circular buffer in MessageBus
+- [x] `BusMessage.summary` and `is_broadcast` fields
+- [x] `MessageBus.add_broadcast()`, `get_recent_broadcasts()`
+- [x] `_build_broadcast_context()` helper on MainModule for LLM context injection
 
-### To Do — S-Path (Self-Path)
+### Done — S-Path
 
-- [ ] Add `CognitionPath.S` to enum and route table (sender == receiver)
-- [ ] Design idle detection: timer-based wake-up per module
-- [ ] Implement S-path trigger in message loop template (idle threshold → "find something to do")
-- [ ] Resource-aware S-path: suppress when budget is low
-- [ ] S-path interrupt: new real message cancels pending S-path processing
+- [x] `CognitionPath.S` in enum and VALID_PATH_ROUTES (sender == receiver for all families)
+- [x] `_on_idle()` hook in message loop template (default no-op, override for Stage 2)
 
-### To Do — Module Implementation
+### Done — Message Loop Template
 
-- [ ] Implement `ReactionModule.perceive()` — classify input via LLM, route to R/E/U path
-- [ ] Implement `ReactionModule.classify_input()` — LLM decides path
-- [ ] Implement `ReactionModule._message_loop()` — receive D-path directives from Pr
-- [ ] Implement `PredictionModule.reason()` — LLM-based reasoning over context + evaluation
-- [ ] Implement `PredictionModule.dispatch()` — send D-path directive to target family
-- [ ] Implement `PredictionModule._message_loop()` — handle U-path from Re, P-path from Ev
-- [ ] Implement `EvaluationModule.evaluate()` — LLM-based assessment with confidence scores
-- [ ] Implement `EvaluationModule.generate_affordances()` — brainstorm possible actions
-- [ ] Implement `EvaluationModule._message_loop()` — handle E-path from Re, P-path from Pr
-- [ ] Implement `MemorizationModule.store/search/recall()` — in-memory store for Stage 1
-- [ ] Implement `MemorizationModule._message_loop()` — handle D-path store/retrieve requests
-- [ ] Implement `MotionModule.speak()` — output text to channel
-- [ ] Implement `MotionModule.do()` — execute game action
-- [ ] Implement `MotionModule.get_output()` — collect output for chat loop
-- [ ] Implement `MotionModule._message_loop()` — handle R/P/D-path action directives
-- [ ] Implement `pause_and_answer()` on all five modules
+- [x] Standard `_message_loop()` in MainModule: receive → ack → handle → idle
+- [x] Per-family `_pause_event` for individual module pause/resume
+- [x] Working `pause_and_answer()` on MainModule (pauses, queries LLM, resumes)
+- [x] Abstract `_handle_message()` — each family implements its own processing
 
-### To Do — Message Loop Template
+### Done — Module Implementation
 
-- [ ] Create standard `_message_loop` skeleton in `MainModule` (receive → ack → process → idle hook)
-- [ ] Per-family pause mechanism (not just global bus pause)
+- [x] `ReactionModule.perceive()` — classify input via LLM, route to R/E/U path
+- [x] `ReactionModule.classify_input()` — LLM + MessageCodec decides path
+- [x] `ReactionModule._handle_message()` — handles D-path directives from Pr
+- [x] `PredictionModule.reason()` — LLM-based reasoning over context + evaluation
+- [x] `PredictionModule.dispatch()` — send D-path directive to target family
+- [x] `PredictionModule._handle_message()` — handle U-path from Re, P-path from Ev
+- [x] `EvaluationModule.evaluate()` — LLM assessment with confidence extraction
+- [x] `EvaluationModule.generate_affordances()` — higher temperature for creativity
+- [x] `EvaluationModule._handle_message()` — validate Pr plans, evaluate Re input
+- [x] `MemorizationModule.store/search/recall()` — in-memory store with substring search
+- [x] `MemorizationModule._handle_message()` — dispatch store/search/recall actions
+- [x] `MotionModule.speak()` — queues text output for chat loop
+- [x] `MotionModule.do()` — logs and queues game action descriptions
+- [x] `MotionModule.get_output()` — async queue for run_agent.py
+- [x] `MotionModule._handle_message()` — extracts actions/plans/text from messages
+
+### Done — Testing
+
+- [x] 38 tests passing (family behavior, MessageCodec, broadcasts, S-path)
+- [x] Injectable completion_fn enables all tests without LLM API
+
+### To Do — Context & Conversation
+
 - [ ] Context window manager — maintain conversation history within each module
+- [ ] Auto-populate message context (parent body summary, family states) without LLM involvement
+- [ ] Attach "last N broadcasts" as context when processing messages (currently built but not automatically injected into every LLM call)
 
 ### To Do — Testing & Evaluation Harness
 
@@ -105,7 +107,7 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ### To Do — Game Integration
 
-- [ ] Design `GameAdapter` interface (translates game engine ↔ Re/Mo)
+- [ ] Design `GameAdapter` interface (translates game engine ↔ Re/Mo text-based I/O)
 - [ ] Implement Tic-Tac-Toe adapter
 - [ ] Implement Poker adapter
 - [ ] Implement Uno adapter
@@ -119,12 +121,15 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Implement Ev weight storage and adjustment mechanism
 - [ ] Cross-session learning: Pr writes lessons to self.md (already has section in rulebook)
 - [ ] Me long-term memory: persist memories across restarts
+- [ ] Me short-term memory: scoped to session/game with auto-expiry
 - [ ] Self-evaluation: agent examines its own performance after each game
 - [ ] 申告制 (Self-Registration): implement full announce → update self.md → broadcast flow
+- [ ] S-path idle detection: timer-based wake-up per module (resource-aware, suppressible)
+- [ ] Broadcast storage revision (currently Option A, may need to change)
 
 ---
 
-## Stage 3: Resource Management
+## Stage 3: Resource Management & Polish
 
 - [ ] Track token count per family per session
 - [ ] Track thinking time per family
@@ -132,6 +137,7 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Enforce resource limits from config
 - [ ] State derived from workload/resource ratio
 - [ ] Resource-aware scheduling: low-resource families get priority on bus
+- [ ] Revise character.md vs identity prompts (keep separate for now per Q9 answer)
 
 ---
 
@@ -140,8 +146,9 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Configurable cognition paths via YAML (not hardcoded in bus.py)
 - [ ] Event sourcing on bus (append-only message log for replay/analysis)
 - [ ] Circuit-breaker pattern for LLM failures
-- [ ] Re sub-modules: Vision, Audio, Net-Search
+- [ ] Re sub-modules: Vision, Audio, Net-Search (for web/VR per Q6 answer)
 - [ ] Pr sub-module: Plan
 - [ ] Me sub-modules: Short-term, Long-term, Logs
 - [ ] Admin visualization app (WebSocket live view)
 - [ ] Multi-agent scenarios (multiple TakenokoAI instances)
+- [ ] Persistent message counter across restarts
