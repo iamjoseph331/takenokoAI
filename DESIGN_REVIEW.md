@@ -189,7 +189,7 @@ The notes say: *"spontaneous predicting ability, reactive predicting ability, an
 - **Spontaneous prediction → Pr?** This mapping is clearest. Pr plans and reasons without being prompted by external stimuli.  
 - **Gain from prediction → Ev?** Evaluation is about judging outcomes, but "gaining from prediction" could also mean learning and updating behavior, which touches Me (remembering lessons) and updating prompts.
 
-**Your answer:** *(please clarify the mapping and whether Re/Pr/Ev names should change to better reflect the thesis)*
+**Your answer:** Reactive prediction is a kind of prediction ability that does not require bayes update and happens in a shorter period of time. Things like knowing a pen is falling when it rolled towards the edge of a table, or knowing the meaning of words on a wall are all reactive prediction. Contrary, spontaneous prediction is a more long termed, bayes updated prediction ability. Beliefs such as: doing this will lead to this result are typical spontaneous prediction. Gainability, moreformally written as "the ability to gain benefit from the prediction", actually has its two most important components in <Ev>. They are the ability to generate afforded actions (possible actions) and the ability to correctly evaluate the state. What action will lead to what state is the responsibility of spontaneous prediction. <Mo> runs the action. You are right that <Me> provides the materials for learning, but learnt preference lies in <Ev>.
 
 ### Q2: What does "testing the three abilities separately" look like concretely?
 
@@ -201,7 +201,7 @@ Scenario: The agent is playing Tic-Tac-Toe. It's the agent's turn.
 
 Is this the right mental model? Or is "testing separately" more about testing different LLM/prompt combinations for each family and comparing their performance?
 
-**Your answer:** *(please describe a concrete test scenario)*
+**Your answer:** This is basically the idea. However, testing separately actually means that I have a test bed in mind with multiple specifically designed tests to test on the AI agent, and playing games is just to make sure that the basic structure works as planned. To make the answer more concrete, Testing Pr alone, it should generate the possible outcome of each possible action, at least to some layers of depth. Testing Ev alone, it should be able to give me all possible moves, alongside with if it is in an advantage or disadvantage state. (Ideally, <Re> should know that Tic-Tac-Toe is easy enough to handle itself and skip the P path)
 
 ### Q3: How should the S-path idle trigger work?
 
@@ -212,7 +212,7 @@ The notes describe: *"the system will periodically tell the modules that you hav
 - How does S-path interact with resource limits? If the agent has used 80% of its thinking budget, should S-path be suppressed?
 - Can S-path messages be interrupted mid-processing by a real message?
 
-**Your answer:** *(please specify the trigger mechanism and scope)*
+**Your answer:** Let all modules have the S-path and leave the idle poking to stage 2, where I introduce the whole resource managing system. If the agent has used 80% of its thinking budget, S-path should be suppressed. I want to let S-path messages postpone if in the queue there are other messages.
 
 ### Q4: Where do broadcast messages live?
 
@@ -224,7 +224,7 @@ The notes describe broadcasts as context that gets included when any message arr
 
 Each has different trade-offs for latency, persistence, and consistency.
 
-**Your answer:** *(please choose an option or propose another)*
+**Your answer:** A but add into TODO to revise later
 
 ### Q5: What if the LLM generates an invalid path or receiver?
 
@@ -235,7 +235,7 @@ The design says LLMs generate `(body, path+receiver, summary)`. LLMs can halluci
 - Should there be a "retry with feedback" loop where the module re-prompts the LLM?
 - Is there a default fallback path (e.g. always fall back to D-path from Pr)?
 
-**Your answer:** *(please specify the error handling strategy)*
+**Your answer:** Infer and send system message. I'm doing it in another branch now. Leave it for now.
 
 ### Q6: How does a game environment connect to the agent?
 
@@ -247,7 +247,7 @@ For Stage 1 (Tic-Tac-Toe, Poker, Uno), the agent needs to:
 
 Is there a "game adapter" that sits outside the agent and translates between the game engine and Re/Mo? Or is the game engine a sub-module of Re (input) and Mo (output)?
 
-**Your answer:** *(please describe the game integration architecture)*
+**Your answer:** There will be sub-modules iof Re and Mo doing things like perceiving and controlling web pages, or similar things in VR space. For now, text base is fine.
 
 ### Q7: What differentiates short-term from long-term memory?
 
@@ -257,7 +257,7 @@ The notes list Me sub-modules: Short-term, Long-term, Logs. But:
 - **Long-term:** Is this cross-session knowledge? Where is it stored (files, database)?
 - **Logs:** Are these different from the file logs already managed by `interface/logging.py`?
 
-**Your answer:** *(please define storage characteristics for each memory type)*
+**Your answer:** Only do logs now. Keep the TODO for stage 2.
 
 ### Q8: Should Ev's evaluation and affordance generation be the same LLM call?
 
@@ -267,7 +267,7 @@ Currently `evaluate()` and `generate_affordances()` are separate methods. But:
 
 These might benefit from different LLM temperatures or even different models. Evaluation needs precision (low temperature); affordance generation needs creativity (higher temperature).
 
-**Your answer:** *(should these be separate sub-modules with independent LLM configs?)*
+**Your answer:** Use the same model with different temperatures for now.
 
 ### Q9: Is `character.md` distinct enough from identity prompts to justify the token cost?
 
@@ -275,7 +275,7 @@ Every module's system prompt includes: `<identity>` (what it is) + `<character>`
 
 Including both in every LLM call costs tokens. Is the distinction valuable enough? Or could character traits be folded into the identity prompts?
 
-**Your answer:** *(keep separate, merge, or make character optional?)*
+**Your answer:** keep separate but add in TODO for revision in stage 3 
 
 ### Q10: Should the bus enforce paths or just log violations?
 
@@ -286,7 +286,7 @@ Currently, route validation logs a warning but sends anyway. Two options:
 
 A middle ground: enforce in production, advisory in debug mode (configurable).
 
-**Your answer:** *(enforce, advisory, or configurable?)*
+**Your answer:** make it advisory for now but log errors.
 
 ---
 
