@@ -82,8 +82,18 @@ class MemorizationModule(MainModule):
         raise NotImplementedError("recall: retrieve memory by memory_id")
 
     async def _message_loop(self) -> None:
-        """Listen for store/search/recall requests from other families."""
-        raise NotImplementedError("MemorizationModule._message_loop")
+        """Listen for store/search/recall requests from other families.
+
+        Stage 1: idle loop — receives and acks messages (not yet implemented).
+        """
+        self._logger.action("_message_loop started (Stage 1: idle)")
+        while self._running:
+            try:
+                message = await self._bus.receive(self.qualified_name, timeout=1.0)
+            except TimeoutError:
+                continue
+            await self.send_ack(message)
+            # Me not yet active in Stage 1 — log and discard
 
     async def get_resources(self) -> dict[str, Any]:
         raise NotImplementedError("MemorizationModule.get_resources")

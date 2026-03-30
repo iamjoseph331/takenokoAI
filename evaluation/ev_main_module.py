@@ -67,8 +67,18 @@ class EvaluationModule(MainModule):
         )
 
     async def _message_loop(self) -> None:
-        """Listen for messages from Re (E path) and Pr (P path)."""
-        raise NotImplementedError("EvaluationModule._message_loop")
+        """Listen for messages from Re (E path) and Pr (P path).
+
+        Stage 1: idle loop — receives and acks messages (not yet implemented).
+        """
+        self._logger.action("_message_loop started (Stage 1: idle)")
+        while self._running:
+            try:
+                message = await self._bus.receive(self.qualified_name, timeout=1.0)
+            except TimeoutError:
+                continue
+            await self.send_ack(message)
+            # Ev not yet active in Stage 1 — log and discard
 
     async def get_resources(self) -> dict[str, Any]:
         raise NotImplementedError("EvaluationModule.get_resources")
