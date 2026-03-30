@@ -8,7 +8,7 @@ TakenokoAI models intelligence as three core abilities: **spontaneous prediction
 
 **Stage 1 target:** play Tic-Tac-Toe, Poker, and Uno without changing the agent's structure.
 
-The system structure is still in planning stage. See `/notes` for raw design notes.
+The system structure is still in planning stage. See `notes` (root-level file) for raw design notes. See `DESIGN_REVIEW.md` for an architectural audit with open questions.
 
 ## The Five Families
 
@@ -29,10 +29,11 @@ Each family has a main module and dynamically attachable sub-modules. Sub-module
 ```
 <family>/
   <prefix>_main_module.py   # entry point, owns the family
-  <prefix>_rulebook.md      # intramodule communication rules
-  <prefix>_character.md     # personality / character definition
-  README.md
+  <prefix>_rulebook.md      # intramodule communication rules (only pr_rulebook.md exists so far)
 ```
+
+Character definitions live in `character.md` at the project root (one section per family).
+Identity prompts live in `prompts/identity/<prefix>_identity.md`.
 
 ## Communication
 
@@ -104,19 +105,23 @@ Three resource types: **token count**, **thinking time**, and **RAM**. Tracking 
 
 ## Supporting Infrastructure
 
-| Path | Purpose |
-|------|---------|
-| `interface/bus.py` | Intermodule message bus |
-| `interface/modules.py` | Module registry |
-| `interface/logging.py` | Logging (log everything — every thought, message, and action) |
-| `interface/permissions.py` | Permission management for `self.md` writes and cross-family access |
-| `prompts/<family>/<prefix>_default.md` | Default LLM prompt templates per family |
-| `admin/visualization_app.py` | Agent visualization tool |
-| `admin/yamls/default.yaml` | Configuration |
-| `admin/utests/` | Unit tests |
-| `admin/debug/` | Debug utilities |
-| `admin/data/` | Data storage |
-| `main.py` | Top-level entry point |
+| Path | Purpose | Status |
+|------|---------|--------|
+| `interface/bus.py` | Intermodule message bus | Implemented |
+| `interface/modules.py` | Base module hierarchy (BaseModule, MainModule, SubModule) | Implemented |
+| `interface/llm.py` | LLM abstraction via litellm | Implemented |
+| `interface/prompt_assembler.py` | 4-part system prompt assembly | Implemented |
+| `interface/logging.py` | Structured logging (rotating file + console) | Implemented |
+| `interface/permissions.py` | Permission management for self.md writes and cross-family access | Implemented |
+| `interface/character_model.py` | Character/personality model manager | Implemented |
+| `interface/markdown_utils.py` | Markdown section parser | Implemented |
+| `prompts/identity/<prefix>_identity.md` | Identity prompts per family | Implemented |
+| `admin/yamls/default.yaml` | Configuration | Implemented |
+| `admin/utests/` | Unit tests | Partial (stubs only) |
+| `admin/run_agent.py` | Chat loop runner | Implemented (needs module impls) |
+| `admin/debug_api.py` | REST debug API (pause/resume/inject/talk/ask) | Implemented |
+| `admin/visualization_app.py` | Agent visualization tool | **Not yet created** |
+| `main.py` | Top-level orchestrator + SelfModel | Implemented |
 
 ## Conventions
 

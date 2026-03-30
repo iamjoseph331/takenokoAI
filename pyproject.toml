@@ -11,7 +11,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
+admin = ["fastapi>=0.100", "uvicorn>=0.20"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["interface", "reaction", "prediction", "evaluation", "memorization", "motion", "admin"]
