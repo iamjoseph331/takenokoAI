@@ -19,7 +19,7 @@ from interface.bus import (
     MessageBus,
     QueueFullSignal,
 )
-from interface.llm import LLMClient, LLMConfig
+from interface.llm import CompletionFn, LLMClient, LLMConfig
 from interface.logging import ModuleLogger
 from interface.permissions import PermissionAction, PermissionManager
 from interface.prompt_assembler import PromptAssembler
@@ -30,6 +30,9 @@ class ModuleState(StrEnum):
 
     IDLE = "IDLE"
     THINKING = "THINKING"
+
+
+IDLE_TIMEOUT_S = 1.0
 
 
 class BaseModule(ABC):
@@ -48,13 +51,18 @@ class BaseModule(ABC):
         llm_config: LLMConfig,
         permissions: PermissionManager,
         prompt_assembler: PromptAssembler | None = None,
+        completion_fn: CompletionFn | None = None,
     ) -> None:
         self.family_prefix = family_prefix
         self.name = name
         self._bus = bus
         self._logger = logger
         self._permissions = permissions
-        self._llm = LLMClient(llm_config, logger, prompt_assembler=prompt_assembler)
+        self._llm = LLMClient(
+            llm_config, logger,
+            prompt_assembler=prompt_assembler,
+            completion_fn=completion_fn,
+        )
         self._queue = bus.register(self.qualified_name)
 
     @property
@@ -64,12 +72,10 @@ class BaseModule(ABC):
 
     @abstractmethod
     async def start(self) -> None:
-        """Start the module's processing loop."""
         raise NotImplementedError("Subclasses must implement start()")
 
     @abstractmethod
     async def stop(self) -> None:
-        """Gracefully stop the module."""
         raise NotImplementedError("Subclasses must implement stop()")
 
     async def send_message(
@@ -83,21 +89,20 @@ class BaseModule(ABC):
         trace_id: str = "",
         resources: dict[str, Any] | None = None,
     ) -> str:
-        """Build and send a BusMessage, returning the new message_id."""
         raise NotImplementedError("send_message requires MainModule context")
 
-    # SUGGESTION (Graceful degradation):
-    # Wrap think() calls with asyncio.wait_for(timeout=thinking_timeout_ms/1000).
-    # On timeout or LLM error, set state to ERROR, log the failure, and either:
-    #   a) Return a fallback response (e.g. "no response available")
-    #   b) Re-queue the task for retry with exponential backoff (max 3 retries)
-    # Consider a circuit-breaker pattern: after N consecutive failures, stop
-    # sending to that family and notify Pr to re-route.
-
-    async def think(self, messages: list[dict[str, str]], **kwargs: Any) -> str:
+    async def think(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature_override: float | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Call the LLM and log the interaction."""
         self._logger.thought(f"Thinking... ({len(messages)} messages)")
-        result = await self._llm.complete(messages, **kwargs)
+        result = await self._llm.complete(
+            messages, temperature_override=temperature_override, **kwargs
+        )
         self._logger.thought(f"Thought complete: {len(result)} chars")
         return result
 
@@ -107,6 +112,9 @@ class MainModule(BaseModule):
 
     Owns the message counter, state machine, sub-module registry,
     and the async API surface exposed to other families.
+
+    Provides a standard _message_loop() that subclasses extend via
+    _handle_message() (for processing) and _on_idle() (for S-path).
     """
 
     def __init__(
@@ -117,10 +125,12 @@ class MainModule(BaseModule):
         llm_config: LLMConfig,
         permissions: PermissionManager,
         prompt_assembler: PromptAssembler | None = None,
+        completion_fn: CompletionFn | None = None,
     ) -> None:
         super().__init__(
             family_prefix, "main", bus, logger, llm_config, permissions,
             prompt_assembler=prompt_assembler,
+            completion_fn=completion_fn,
         )
         self._message_counter: int = 0
         self._state: ModuleState | str = ModuleState.IDLE
@@ -128,6 +138,9 @@ class MainModule(BaseModule):
         self._submodules: dict[str, SubModule] = {}
         self._task_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._running: bool = False
+        self._pause_event: asyncio.Event = asyncio.Event()
+        self._pause_event.set()  # not paused by default
+        self._pause_response_queue: asyncio.Queue[str] = asyncio.Queue()
 
     # ── Message ID generation ──
 
@@ -140,7 +153,6 @@ class MainModule(BaseModule):
 
     @staticmethod
     def _generate_trace_id() -> str:
-        """Generate a new trace ID (first 12 hex chars of uuid4)."""
         return uuid.uuid4().hex[:12]
 
     async def send_message(
@@ -153,27 +165,22 @@ class MainModule(BaseModule):
         parent_message_id: str | None = None,
         trace_id: str = "",
         resources: dict[str, Any] | None = None,
+        summary: str = "",
     ) -> str:
         """Build, validate, and send a message on the bus.
 
-        If trace_id is empty and no parent_message_id is provided, a new
-        trace_id is generated. This allows tracing message chains across
-        families (e.g. the full P path: Ev->Pr->Ev->Mo).
-
-        Returns the message_id. If the receiver's queue is full, logs a
-        warning and returns the message_id prefixed with "FULL:" to signal
-        backpressure to the caller.
+        Returns the message_id. If the receiver's queue is full, returns
+        the message_id prefixed with "FULL:" as a backpressure signal.
         """
         msg_id = self.next_message_id(path)
 
-        # Propagate or generate trace_id
         if not trace_id:
             trace_id = self._generate_trace_id()
 
         if not MessageBus.validate_route(self.family_prefix, receiver, path):
             self._logger.action(
                 f"WARNING: Route {self.family_prefix}->{receiver} not standard "
-                f"for path {path}, sending anyway"
+                f"for path {path}, sending anyway (advisory)"
             )
 
         message = BusMessage(
@@ -186,6 +193,7 @@ class MainModule(BaseModule):
             sender=self.family_prefix,
             receiver=receiver,
             resources=resources,
+            summary=summary,
         )
         result = await self._bus.send(message)
 
@@ -201,11 +209,7 @@ class MainModule(BaseModule):
     async def send_ack(
         self, original_message: BusMessage, *, queue_size: int | None = None
     ) -> None:
-        """Send an acknowledgment back to the sender of a message.
-
-        Ack messages use the same message ID with a lowercase prefix
-        and carry the current queue size in the body.
-        """
+        """Send an acknowledgment back to the sender of a message."""
         ack_id = MessageBus.make_ack_id(original_message.message_id)
         ack = BusMessage(
             message_id=ack_id,
@@ -226,21 +230,18 @@ class MainModule(BaseModule):
     # ── Sub-module management (申告制) ──
 
     def register_submodule(self, sub: SubModule) -> None:
-        """Register a sub-module under this main module."""
         self._submodules[sub.name] = sub
         self._logger.action(
             f"Sub-module registered: {sub.name} — {sub.description}"
         )
 
     def unregister_submodule(self, name: str) -> None:
-        """Remove a sub-module."""
         if name in self._submodules:
             self._bus.unregister(self._submodules[name].qualified_name)
             del self._submodules[name]
             self._logger.action(f"Sub-module unregistered: {name}")
 
     def list_submodules(self) -> dict[str, dict[str, str]]:
-        """Return capability descriptors for all registered sub-modules."""
         return {name: sub.announce() for name, sub in self._submodules.items()}
 
     # ── State management ──
@@ -250,34 +251,24 @@ class MainModule(BaseModule):
         return self._state
 
     async def set_state(self, new_state: ModuleState | str) -> None:
-        """Update module state and broadcast the change."""
         old_state = self._state
         self._state = new_state
         if isinstance(new_state, str) and new_state not in ModuleState.__members__:
             self._custom_states.add(new_state)
         self._logger.action(f"State: {old_state} -> {new_state}")
 
-    # ── Async API surface (exposed to other families) ──
+    # ── Async API surface ──
 
     async def get_resources(self) -> dict[str, Any]:
-        """Return current resource levels of this family."""
-        raise NotImplementedError("get_resources")
+        return {"state": str(self._state), "queue_size": self._queue.qsize()}
 
     async def get_queue_info(self) -> dict[str, Any]:
-        """Return task queue statistics."""
         return {
             "length": self._task_queue.qsize(),
             "max_length": self._task_queue.maxsize,
         }
 
-    # SUGGESTION (Config divergence):
-    # Extract _build_llm_config() logic into a shared ConfigResolver class that
-    # both TakenokoAgent.start() and MainModule.change_*() use, so the boot path
-    # and hot-swap path stay in sync. The resolver would read from YAML at boot
-    # and validate the same constraints on hot-swap.
-
     async def change_prompt(self, requester: FamilyPrefix) -> None:
-        """Reassemble the system prompt from all sources. Requires permission."""
         if not self._permissions.check(
             requester, PermissionAction.CHANGE_PROMPT, self.family_prefix.value
         ):
@@ -287,7 +278,6 @@ class MainModule(BaseModule):
         await self._llm.reload_system_prompt()
 
     async def change_model(self, model_name: str, requester: FamilyPrefix) -> None:
-        """Change the LLM model. Requires permission."""
         if not self._permissions.check(
             requester, PermissionAction.CHANGE_MODEL, self.family_prefix.value
         ):
@@ -297,7 +287,6 @@ class MainModule(BaseModule):
         self._llm.update_config(model_name=model_name)
 
     async def restart(self, requester: FamilyPrefix) -> None:
-        """Restart this module. Requires permission."""
         if not self._permissions.check(
             requester, PermissionAction.RESTART_MODULE, self.family_prefix.value
         ):
@@ -308,34 +297,110 @@ class MainModule(BaseModule):
         await self.start()
 
     async def get_limits(self) -> dict[str, Any]:
-        """Return family limits (max context tokens, etc.)."""
-        raise NotImplementedError("get_limits")
+        return {
+            "max_tokens": self._llm.config.max_tokens,
+            "model": self._llm.config.model_name,
+            "timeout_s": self._llm.config.timeout_s,
+        }
 
     async def pause_and_answer(
         self, question: str, requester: FamilyPrefix
     ) -> str:
-        """Pause current work and answer a question from another family."""
-        raise NotImplementedError("pause_and_answer")
+        """Pause this module's processing loop, send the question to the
+        LLM with current context, and return the answer.
 
-    # ── Message loop ──
+        The module resumes normal processing after answering.
+        """
+        self._logger.action(
+            f"pause_and_answer from {requester}: {question[:80]}..."
+        )
+        was_paused = not self._pause_event.is_set()
+        self._pause_event.clear()  # pause processing
+
+        try:
+            broadcasts = self._bus.get_recent_broadcasts(5)
+            broadcast_text = "\n".join(
+                f"- [{b.sender}] {b.summary}" for b in broadcasts
+            ) if broadcasts else "(none)"
+
+            context_msg = (
+                f"You are being asked a question by the operator ({requester}).\n"
+                f"Your current state: {self._state}\n"
+                f"Queue depth: {self._queue.qsize()}\n"
+                f"Recent broadcasts:\n{broadcast_text}\n\n"
+                f"Question: {question}\n\n"
+                f"Answer concisely and directly."
+            )
+            messages = [{"role": "user", "content": context_msg}]
+            answer = await self.think(messages)
+            return answer
+        finally:
+            if not was_paused:
+                self._pause_event.set()  # resume
+
+    # ── Broadcast context helper ──
+
+    def _build_broadcast_context(self) -> str:
+        """Build a string of recent broadcasts for inclusion in LLM context."""
+        broadcasts = self._bus.get_recent_broadcasts(5)
+        if not broadcasts:
+            return ""
+        lines = [f"[{b.sender}] {b.summary}" for b in broadcasts]
+        return "Recent activity:\n" + "\n".join(lines)
+
+    # ── Message loop (template method pattern) ──
+
+    async def _message_loop(self) -> None:
+        """Standard message loop: receive → ack → handle → idle.
+
+        Subclasses override _handle_message() for processing logic
+        and optionally _on_idle() for S-path behavior.
+        """
+        self._logger.action(f"_message_loop started for {self.qualified_name}")
+        while self._running:
+            await self._pause_event.wait()
+            try:
+                message = await self._bus.receive(
+                    self.qualified_name, timeout=IDLE_TIMEOUT_S
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                await self._on_idle()
+                continue
+
+            if message.is_ack:
+                self._logger.bus_message(
+                    f"ACK received: {message.message_id}"
+                )
+                continue
+
+            await self.send_ack(message)
+            await self.set_state(ModuleState.THINKING)
+            try:
+                await self._handle_message(message)
+            except Exception as e:
+                self._logger.action(
+                    f"Error handling message {message.message_id}: {e}",
+                    data={"error": str(e)},
+                )
+            await self.set_state(ModuleState.IDLE)
 
     @abstractmethod
-    async def _message_loop(self) -> None:
-        """Main processing loop — each family implements its own.
+    async def _handle_message(self, message: BusMessage) -> None:
+        """Process a single incoming message. Subclasses must implement."""
+        raise NotImplementedError
 
-        Contract: when a message arrives, the loop should send an ack back
-        to the sender via send_ack() with the current queue size before
-        processing the message body.
+    async def _on_idle(self) -> None:
+        """Called when no message arrives within the timeout.
+
+        Default: do nothing. Override for S-path behavior (Stage 2).
         """
-        raise NotImplementedError("Subclasses must implement _message_loop()")
+        pass
 
     async def start(self) -> None:
-        """Start the message processing loop."""
         self._running = True
         self._logger.action(f"{self.qualified_name} started")
 
     async def stop(self) -> None:
-        """Signal the module to stop."""
         self._running = False
         self._logger.action(f"{self.qualified_name} stopped")
 
@@ -346,10 +411,6 @@ class SubModule(BaseModule):
     Sub-modules attach to a parent MainModule and announce their
     capabilities via the self-registration protocol (申告制).
     """
-
-    # TODO: Add start()/stop() lifecycle hooks with setup/teardown for
-    # SubModules (e.g. loading embedding indices for Me submodules,
-    # initializing audio streams for Re submodules).
 
     def __init__(
         self,
@@ -371,7 +432,6 @@ class SubModule(BaseModule):
         parent.register_submodule(self)
 
     def announce(self) -> dict[str, str]:
-        """Return a capability descriptor for self.md registration."""
         return {
             "name": self.name,
             "family": self.family_prefix.value,
@@ -381,7 +441,6 @@ class SubModule(BaseModule):
 
     @abstractmethod
     async def handle_message(self, message: BusMessage) -> Optional[BusMessage]:
-        """Process an incoming message. Return a response message or None."""
         raise NotImplementedError("Subclasses must implement handle_message()")
 
     async def start(self) -> None:

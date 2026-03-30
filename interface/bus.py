@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Coroutine
@@ -36,19 +37,9 @@ class CognitionPath(StrEnum):
     E = "E"  # Appraisal: Re -> Ev
     U = "U"  # Uptake: Re -> Pr
     D = "D"  # Dispatch: Pr -> Re | Ev | Mo | Me
+    S = "S"  # Self: sender == receiver (idle wake-up, reconsideration)
 
 
-# SUGGESTION (Configurable routes):
-# Move VALID_PATH_ROUTES to default.yaml so new cognitive paths can be added
-# without code changes. Format:
-#   paths:
-#     P: [[Ev, Pr], [Pr, Ev], [Ev, Mo], [Ev, Me]]
-#     R: [[Re, Mo]]
-#     ...
-# Load in MessageBus.__init__() and validate at boot. Keep the current dict
-# as a fallback default if no YAML config is provided.
-
-# Valid (sender, receiver) pairs for each cognition path
 VALID_PATH_ROUTES: dict[CognitionPath, list[tuple[FamilyPrefix, FamilyPrefix]]] = {
     CognitionPath.P: [
         (FamilyPrefix.Ev, FamilyPrefix.Pr),
@@ -71,15 +62,21 @@ VALID_PATH_ROUTES: dict[CognitionPath, list[tuple[FamilyPrefix, FamilyPrefix]]] 
         (FamilyPrefix.Pr, FamilyPrefix.Mo),
         (FamilyPrefix.Pr, FamilyPrefix.Me),
     ],
+    CognitionPath.S: [
+        (FamilyPrefix.Re, FamilyPrefix.Re),
+        (FamilyPrefix.Pr, FamilyPrefix.Pr),
+        (FamilyPrefix.Ev, FamilyPrefix.Ev),
+        (FamilyPrefix.Me, FamilyPrefix.Me),
+        (FamilyPrefix.Mo, FamilyPrefix.Mo),
+    ],
 }
 
-# Regex for message IDs: <2-letter prefix><8-digit counter><path letter>
-# Lowercase prefix indicates an ack message (e.g. "pr00000012P" acks "Pr00000012P")
 MESSAGE_ID_PATTERN = re.compile(
-    r"^(Re|Pr|Ev|Me|Mo|re|pr|ev|me|mo)\d{8}[PREUD]$"
+    r"^(Re|Pr|Ev|Me|Mo|re|pr|ev|me|mo)\d{8}[PREUDS]$"
 )
 
 DEFAULT_QUEUE_MAXSIZE = 5
+DEFAULT_BROADCAST_BUFFER_SIZE = 20
 
 
 @dataclass(frozen=True)
@@ -104,6 +101,8 @@ class BusMessage(BaseModel):
     receiver: FamilyPrefix
     resources: dict[str, Any] | None = None
     is_ack: bool = False
+    is_broadcast: bool = False
+    summary: str = ""
 
     @field_validator("message_id")
     @classmethod
@@ -116,18 +115,31 @@ class BusMessage(BaseModel):
         return v
 
 
+@dataclass(frozen=True)
+class Broadcast:
+    """A summary broadcast stored in the bus's circular buffer."""
+
+    summary: str
+    sender: FamilyPrefix
+    timecode: float
+    trace_id: str = ""
+
+
 class MessageBus:
     """Central message bus for intermodule communication.
 
     Each registered module gets a bounded asyncio.Queue for incoming messages.
     Queue sizes are configurable per-family to provide backpressure.
     The bus validates routes against cognition path rules before delivery.
+
+    Also maintains a circular buffer of recent broadcasts for context injection.
     """
 
     def __init__(
         self,
         logger: ModuleLogger,
         queue_limits: dict[str, int] | None = None,
+        broadcast_buffer_size: int = DEFAULT_BROADCAST_BUFFER_SIZE,
     ) -> None:
         self._logger = logger
         self._queue_limits = queue_limits or {}
@@ -135,15 +147,12 @@ class MessageBus:
         self._subscribers: dict[
             str, Callable[[BusMessage], Coroutine[Any, Any, None]]
         ] = {}
-        # Pause control: when cleared, receive() blocks until resumed.
         self.pause_event: asyncio.Event = asyncio.Event()
         self.pause_event.set()  # start running (not paused)
+        self._broadcasts: deque[Broadcast] = deque(maxlen=broadcast_buffer_size)
 
     def _resolve_maxsize(self, module_name: str) -> int:
-        """Resolve queue maxsize for a module.
-
-        Checks in order: exact module name, family prefix, then default.
-        """
+        """Resolve queue maxsize for a module."""
         if module_name in self._queue_limits:
             return self._queue_limits[module_name]
         prefix = module_name.split(".")[0] if "." in module_name else module_name
@@ -167,12 +176,20 @@ class MessageBus:
         self._subscribers.pop(module_name, None)
         self._logger.action(f"Unregistered module from bus: {module_name}")
 
-    async def send(self, message: BusMessage) -> QueueFullSignal | None:
-        """Validate and route a message to its receiver's queue.
+    def add_broadcast(self, broadcast: Broadcast) -> None:
+        """Add a broadcast to the circular buffer."""
+        self._broadcasts.append(broadcast)
+        self._logger.bus_message(
+            f"BROADCAST [{broadcast.sender}]: {broadcast.summary[:100]}"
+        )
 
-        Returns None on success, or a QueueFullSignal if the receiver's
-        queue is at capacity (backpressure signal to the sender).
-        """
+    def get_recent_broadcasts(self, n: int = 5) -> list[Broadcast]:
+        """Return the last N broadcasts (most recent last)."""
+        items = list(self._broadcasts)
+        return items[-n:] if len(items) > n else items
+
+    async def send(self, message: BusMessage) -> QueueFullSignal | None:
+        """Validate and route a message to its receiver's queue."""
         receiver_name = self._resolve_receiver(message.receiver.value)
 
         self._logger.bus_message(
@@ -180,6 +197,15 @@ class MessageBus:
             + (f" trace={message.trace_id}" if message.trace_id else ""),
             data={"body_preview": str(message.body)[:200]},
         )
+
+        # Record broadcast if summary is present
+        if message.summary:
+            self.add_broadcast(Broadcast(
+                summary=message.summary,
+                sender=message.sender,
+                timecode=message.timecode,
+                trace_id=message.trace_id,
+            ))
 
         try:
             self._queues[receiver_name].put_nowait(message)
@@ -195,7 +221,6 @@ class MessageBus:
                 message_id=message.message_id,
             )
 
-        # Fire subscriber callback if one exists
         if receiver_name in self._subscribers:
             await self._subscribers[receiver_name](message)
 
@@ -204,20 +229,20 @@ class MessageBus:
     async def receive(
         self, module_name: str, *, timeout: float | None = None
     ) -> BusMessage:
-        """Wait for and return the next message for a module.
-
-        If the bus is paused (pause_event is cleared), blocks until resumed
-        before attempting to read from the queue.
-        """
+        """Wait for and return the next message for a module."""
         if module_name not in self._queues:
             raise ValueError(f"Module {module_name!r} is not registered on the bus")
-        # Block while paused — messages accumulate but are not delivered
         await self.pause_event.wait()
         if timeout is not None:
             return await asyncio.wait_for(
                 self._queues[module_name].get(), timeout=timeout
             )
         return await self._queues[module_name].get()
+
+    def has_pending(self, module_name: str) -> bool:
+        """Check if a module has pending messages (non-blocking)."""
+        q = self._queues.get(module_name)
+        return q is not None and not q.empty()
 
     def subscribe(
         self,
@@ -228,7 +253,7 @@ class MessageBus:
         self._subscribers[module_name] = callback
 
     def _resolve_receiver(self, receiver_name: str) -> str:
-        """Find the actual queue key for a receiver (plain prefix or qualified name)."""
+        """Find the actual queue key for a receiver."""
         if receiver_name in self._queues:
             return receiver_name
         qualified = f"{receiver_name}.main"
@@ -247,10 +272,7 @@ class MessageBus:
 
     @staticmethod
     def make_ack_id(original_id: str) -> str:
-        """Build an ack message ID by lowercasing the 2-letter prefix.
-
-        e.g. "Pr00000012P" -> "pr00000012P"
-        """
+        """Build an ack message ID by lowercasing the 2-letter prefix."""
         return original_id[:2].lower() + original_id[2:]
 
     @staticmethod

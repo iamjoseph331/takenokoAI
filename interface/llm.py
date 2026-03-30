@@ -9,9 +9,10 @@ LLM providers via litellm's model string routing:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, TYPE_CHECKING
+from typing import Any, AsyncIterator, Callable, Coroutine, TYPE_CHECKING
 
 import litellm
 
@@ -20,12 +21,15 @@ from interface.logging import ModuleLogger
 if TYPE_CHECKING:
     from interface.prompt_assembler import PromptAssembler
 
+CompletionFn = Callable[..., Coroutine[Any, Any, Any]]
 
 _DEFAULT_API_ENV_MAP = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "ollama": "OLLAMA_API_KEY",
 }
+
+DEFAULT_LLM_TIMEOUT_S = 120.0
 
 
 def configure_api_keys(
@@ -81,6 +85,7 @@ class LLMConfig:
     model_name: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
+    timeout_s: float = DEFAULT_LLM_TIMEOUT_S
     extra_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -89,25 +94,26 @@ class LLMClient:
 
     Each module gets its own LLMClient with independently configurable
     model, temperature, and system prompt.
-    """
 
-    # SUGGESTION (Test seams):
-    # Accept an optional `completion_fn` parameter in __init__ that defaults to
-    # litellm.acompletion. In tests, inject a mock:
-    #   mock_fn = AsyncMock(return_value=fake_response)
-    #   client = LLMClient(config, logger, completion_fn=mock_fn)
-    # This avoids burning API tokens during development and testing.
+    Args:
+        completion_fn: Injectable completion function for testing. Defaults
+            to litellm.acompletion. In tests, inject a mock:
+                mock_fn = AsyncMock(return_value=fake_response)
+                client = LLMClient(config, logger, completion_fn=mock_fn)
+    """
 
     def __init__(
         self,
         config: LLMConfig,
         logger: ModuleLogger,
         prompt_assembler: PromptAssembler | None = None,
+        completion_fn: CompletionFn | None = None,
     ) -> None:
         self._config = config
         self._logger = logger
         self._prompt_assembler = prompt_assembler
         self._system_prompt_cache: str | None = None
+        self._completion_fn: CompletionFn = completion_fn or litellm.acompletion
 
     @property
     def config(self) -> LLMConfig:
@@ -137,17 +143,21 @@ class LLMClient:
         messages: list[dict[str, str]],
         *,
         system_prompt_override: str | None = None,
+        temperature_override: float | None = None,
     ) -> str:
         """Send messages to the LLM and return the completion text.
 
         Args:
             messages: List of {"role": ..., "content": ...} dicts.
             system_prompt_override: If set, replaces the configured system prompt.
+            temperature_override: If set, overrides the configured temperature
+                for this single call (useful for Ev affordance generation).
 
         Returns:
             The assistant's response text.
         """
         system_prompt = system_prompt_override or await self.load_system_prompt()
+        temperature = temperature_override if temperature_override is not None else self._config.temperature
 
         full_messages: list[dict[str, str]] = []
         if system_prompt:
@@ -156,16 +166,26 @@ class LLMClient:
 
         self._logger.thought(
             f"LLM request: model={self._config.model_name}, "
-            f"messages={len(full_messages)}"
+            f"messages={len(full_messages)}, temp={temperature}"
         )
 
-        response = await litellm.acompletion(
-            model=self._config.model_name,
-            messages=full_messages,
-            temperature=self._config.temperature,
-            max_tokens=self._config.max_tokens,
-            **self._config.extra_params,
-        )
+        try:
+            response = await asyncio.wait_for(
+                self._completion_fn(
+                    model=self._config.model_name,
+                    messages=full_messages,
+                    temperature=temperature,
+                    max_tokens=self._config.max_tokens,
+                    **self._config.extra_params,
+                ),
+                timeout=self._config.timeout_s,
+            )
+        except asyncio.TimeoutError:
+            self._logger.action(
+                f"LLM timeout after {self._config.timeout_s}s",
+                data={"model": self._config.model_name},
+            )
+            raise
 
         content = response.choices[0].message.content or ""
         self._logger.thought(f"LLM response: {len(content)} chars")
@@ -193,7 +213,7 @@ class LLMClient:
             f"messages={len(full_messages)}"
         )
 
-        response = await litellm.acompletion(
+        response = await self._completion_fn(
             model=self._config.model_name,
             messages=full_messages,
             temperature=self._config.temperature,
