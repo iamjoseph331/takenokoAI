@@ -7,6 +7,8 @@ inheritance, family_prefix, abstract stubs, and concrete methods.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from interface.bus import FamilyPrefix
@@ -123,10 +125,19 @@ class TestEvaluationModule:
         await module.update_weights({"result": "win", "score": 1.0})
 
     @pytest.mark.asyncio
-    async def test_message_loop_raises_not_implemented(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+    async def test_message_loop_idles_without_error(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
         module = _make_module(EvaluationModule, "Ev", mock_bus, mock_logger, mock_llm_config, mock_permissions)
-        with pytest.raises(NotImplementedError):
-            await module._message_loop()
+        module._running = True
+        # Should not raise — runs idle loop that times out on empty queue
+        task = asyncio.create_task(module._message_loop())
+        await asyncio.sleep(0.05)
+        module._running = False
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 # ── MemorizationModule ──
@@ -159,10 +170,18 @@ class TestMemorizationModule:
             await module.recall("mem_001")
 
     @pytest.mark.asyncio
-    async def test_message_loop_raises_not_implemented(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+    async def test_message_loop_idles_without_error(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
         module = _make_module(MemorizationModule, "Me", mock_bus, mock_logger, mock_llm_config, mock_permissions)
-        with pytest.raises(NotImplementedError):
-            await module._message_loop()
+        module._running = True
+        task = asyncio.create_task(module._message_loop())
+        await asyncio.sleep(0.05)
+        module._running = False
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 # ── MotionModule ──

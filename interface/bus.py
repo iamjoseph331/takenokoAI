@@ -135,6 +135,9 @@ class MessageBus:
         self._subscribers: dict[
             str, Callable[[BusMessage], Coroutine[Any, Any, None]]
         ] = {}
+        # Pause control: when cleared, receive() blocks until resumed.
+        self.pause_event: asyncio.Event = asyncio.Event()
+        self.pause_event.set()  # start running (not paused)
 
     def _resolve_maxsize(self, module_name: str) -> int:
         """Resolve queue maxsize for a module.
@@ -201,9 +204,15 @@ class MessageBus:
     async def receive(
         self, module_name: str, *, timeout: float | None = None
     ) -> BusMessage:
-        """Wait for and return the next message for a module."""
+        """Wait for and return the next message for a module.
+
+        If the bus is paused (pause_event is cleared), blocks until resumed
+        before attempting to read from the queue.
+        """
         if module_name not in self._queues:
             raise ValueError(f"Module {module_name!r} is not registered on the bus")
+        # Block while paused — messages accumulate but are not delivered
+        await self.pause_event.wait()
         if timeout is not None:
             return await asyncio.wait_for(
                 self._queues[module_name].get(), timeout=timeout

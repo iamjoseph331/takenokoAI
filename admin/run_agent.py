@@ -1,12 +1,13 @@
-"""TakenokoAI runner — boots the agent, attaches visualization, and starts a chat loop.
+"""TakenokoAI runner — boots the agent, attaches visualization + debug API, and starts a chat loop.
 
 Usage:
-    python admin/run_agent.py [--no-viz] [--viz-port 7899] [--config admin/yamls/default.yaml]
+    python admin/run_agent.py [--no-viz] [--no-debug] [--viz-port 7899] [--debug-port 7901]
+                              [--config admin/yamls/default.yaml]
 
 The chat loop reads from stdin and sends each line to the Reaction module. The
 response from the Motion module is printed to stdout. Type 'exit' or Ctrl-D to quit.
 
-Open http://localhost:7899 to see the live visualization.
+Open http://localhost:7899 for live visualization, http://localhost:7901 for debug API.
 """
 
 from __future__ import annotations
@@ -97,18 +98,20 @@ async def _run_agent_loops(agent: TakenokoAgent, stop_event: asyncio.Event) -> N
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def _run_viz(viz: object, stop_event: asyncio.Event) -> None:
-    """Run the visualization server until stop_event is set."""
-    viz_task = asyncio.create_task(viz.run())  # type: ignore[attr-defined]
+async def _run_server(server: object, stop_event: asyncio.Event) -> None:
+    """Run a server (viz or debug) until stop_event is set."""
+    task = asyncio.create_task(server.run())  # type: ignore[attr-defined]
     await stop_event.wait()
-    viz_task.cancel()
+    task.cancel()
     try:
-        await viz_task
+        await task
     except asyncio.CancelledError:
         pass
 
 
-async def amain(config: str, viz_port: int, no_viz: bool) -> None:
+async def amain(
+    config: str, viz_port: int, no_viz: bool, debug_port: int, no_debug: bool
+) -> None:
     # ── Boot agent ─────────────────────────────────────────────────────────
     print(f"[runner] Booting TakenokoAI from {config} ...")
     agent = TakenokoAgent(config)
@@ -133,7 +136,19 @@ async def amain(config: str, viz_port: int, no_viz: bool) -> None:
         viz = VizBroadcaster(port=viz_port, families=families_dict)
         viz.attach(agent._bus)  # type: ignore[arg-type]
         print(f"[runner] Visualization → http://localhost:{viz_port}")
-        coros.append(_run_viz(viz, stop_event))
+        coros.append(_run_server(viz, stop_event))
+
+    # ── Optionally attach debug API ───────────────────────────────────────
+    if not no_debug:
+        try:
+            from admin.debug_api import DebugServer
+        except ImportError:
+            from debug_api import DebugServer  # type: ignore[no-redef]
+
+        dbg = DebugServer(port=debug_port)
+        dbg.attach(agent._bus, agent)  # type: ignore[arg-type]
+        print(f"[runner] Debug API    → http://localhost:{debug_port}")
+        coros.append(_run_server(dbg, stop_event))
 
     # ── Run everything concurrently ────────────────────────────────────────
     try:
@@ -160,14 +175,25 @@ def main() -> None:
         help="WebSocket visualization server port (default: 7899)",
     )
     parser.add_argument(
+        "--debug-port",
+        type=int,
+        default=7901,
+        help="Debug API server port (default: 7901)",
+    )
+    parser.add_argument(
         "--no-viz",
         action="store_true",
         help="Disable visualization server",
     )
+    parser.add_argument(
+        "--no-debug",
+        action="store_true",
+        help="Disable debug API server",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(amain(args.config, args.viz_port, args.no_viz))
+        asyncio.run(amain(args.config, args.viz_port, args.no_viz, args.debug_port, args.no_debug))
     except KeyboardInterrupt:
         pass
 
