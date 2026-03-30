@@ -13,6 +13,7 @@ class PermissionAction(StrEnum):
     """Actions that require permission checks."""
 
     WRITE_SELF_MD = "WRITE_SELF_MD"
+    WRITE_CHARACTER = "WRITE_CHARACTER"
     READ_CROSS_FAMILY = "READ_CROSS_FAMILY"
     SEND_CROSS_FAMILY = "SEND_CROSS_FAMILY"
     CHANGE_PROMPT = "CHANGE_PROMPT"
@@ -59,10 +60,11 @@ class PermissionManager:
                 )
             )
 
-        # Each family can write its own self.md section and manage itself
+        # Each family can write its own self.md section, character section, and manage itself
         for prefix in FamilyPrefix:
             for action in (
                 PermissionAction.WRITE_SELF_MD,
+                PermissionAction.WRITE_CHARACTER,
                 PermissionAction.CHANGE_PROMPT,
                 PermissionAction.CHANGE_MODEL,
                 PermissionAction.RESTART_MODULE,

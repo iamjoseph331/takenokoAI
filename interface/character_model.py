@@ -92,11 +92,10 @@ class CharacterModel:
     ) -> None:
         """Update a section in character.md. Permission-checked.
 
-        Uses the same WRITE_SELF_MD permission action — ``<Pr>`` can write
-        any section, other families can write their own.
+        ``<Pr>`` can write any section; other families can write their own.
         """
         if not self._permissions.check(
-            requester, PermissionAction.WRITE_SELF_MD, section
+            requester, PermissionAction.WRITE_CHARACTER, section
         ):
             raise PermissionError(
                 f"{requester} lacks write permission for character section {section!r}"
