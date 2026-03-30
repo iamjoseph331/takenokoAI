@@ -49,3 +49,8 @@ resources:
     Ev: 5
     Me: 5
     Mo: 5
+
+api_key_envs:
+  openai: TAKENOKO_OPENAI_KEY
+  anthropic: TAKENOKO_ANTHROPIC_KEY
+  ollama: TAKENOKO_OLLAMA_KEY

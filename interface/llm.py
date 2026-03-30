@@ -9,6 +9,7 @@ LLM providers via litellm's model string routing:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
@@ -18,6 +19,59 @@ from interface.logging import ModuleLogger
 
 if TYPE_CHECKING:
     from interface.prompt_assembler import PromptAssembler
+
+
+_DEFAULT_API_ENV_MAP = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "ollama": "OLLAMA_API_KEY",
+}
+
+
+def configure_api_keys(
+    api_key_envs: dict[str, str],
+    *,
+    logger: ModuleLogger | None = None,
+) -> None:
+    """Map configured env vars to provider API key envs for litellm."""
+    if not api_key_envs:
+        return
+
+    for provider, source_env in api_key_envs.items():
+        if not source_env:
+            continue
+        target_env = _DEFAULT_API_ENV_MAP.get(provider.lower())
+        if not target_env:
+            if logger:
+                logger.action(
+                    f"Unknown LLM provider for API key mapping: {provider}",
+                    data={"source_env": source_env},
+                )
+            continue
+
+        source_value = os.getenv(source_env)
+        if not source_value:
+            if logger:
+                logger.action(
+                    f"API key not found in env: {source_env}",
+                    data={"provider": provider, "target_env": target_env},
+                )
+            continue
+
+        if os.getenv(target_env):
+            if logger:
+                logger.action(
+                    f"API key already set for {provider}",
+                    data={"target_env": target_env},
+                )
+            continue
+
+        os.environ[target_env] = source_value
+        if logger:
+            logger.action(
+                f"API key wired for {provider}",
+                data={"source_env": source_env, "target_env": target_env},
+            )
 
 
 @dataclass

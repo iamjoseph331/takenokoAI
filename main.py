@@ -12,7 +12,7 @@ import yaml
 
 from interface.bus import FamilyPrefix, MessageBus
 from interface.character_model import CharacterModel
-from interface.llm import LLMConfig
+from interface.llm import LLMConfig, configure_api_keys
 from interface.logging import ModuleLogger, setup_logging
 from interface.markdown_utils import parse_markdown_sections
 from interface.modules import MainModule
@@ -141,6 +141,9 @@ class TakenokoAgent:
         )
         self._logger = ModuleLogger("SYS", "agent")
         self._logger.action("TakenokoAI booting...")
+
+        api_key_envs = self._config.get("api_key_envs", {})
+        configure_api_keys(api_key_envs, logger=self._logger)
 
         # 3. Bus (with per-family queue limits for backpressure)
         resources_cfg = self._config.get("resources", {})

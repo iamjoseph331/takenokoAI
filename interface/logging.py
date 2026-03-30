@@ -46,7 +46,7 @@ class ModuleLogger:
         """Emit a structured log entry."""
         extra = {
             "family": self.family_prefix,
-            "module": self.module_name,
+            "mod_name": self.module_name,
             "category": category.value,
             "data": data or {},
         }
@@ -72,7 +72,7 @@ class _StructuredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         family = getattr(record, "family", "?")
-        module = getattr(record, "module", "?")
+        module = getattr(record, "mod_name", "?")
         category = getattr(record, "category", "?")
         data = getattr(record, "data", {})
         base = super().format(record)
