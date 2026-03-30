@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from interface.bus import FamilyPrefix, MessageBus
@@ -33,6 +34,7 @@ class MotionModule(MainModule):
             FamilyPrefix.Mo, bus, logger, llm_config, permissions,
             prompt_assembler=prompt_assembler,
         )
+        self._output_queue: asyncio.Queue[str] = asyncio.Queue()
 
     async def speak(
         self, content: str, *, channel: str = "default"
@@ -65,6 +67,14 @@ class MotionModule(MainModule):
         raise NotImplementedError(
             "do: execute action with params, return outcome"
         )
+
+    async def get_output(self, *, timeout: float = 30.0) -> str:
+        """Wait for and return the next output produced by this module.
+
+        Used by the chat loop in run_agent.py to collect responses.
+        Raises TimeoutError if no output is available within the timeout.
+        """
+        return await asyncio.wait_for(self._output_queue.get(), timeout=timeout)
 
     async def _message_loop(self) -> None:
         """Listen for action directives from Re, Ev, and Pr."""
