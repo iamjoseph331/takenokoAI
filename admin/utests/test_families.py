@@ -208,7 +208,21 @@ class TestMotionModule:
             await module.do("play_card", params={"card": "ace"})
 
     @pytest.mark.asyncio
-    async def test_message_loop_raises_not_implemented(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+    async def test_message_loop_idles_without_error(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
         module = _make_module(MotionModule, "Mo", mock_bus, mock_logger, mock_llm_config, mock_permissions)
-        with pytest.raises(NotImplementedError):
-            await module._message_loop()
+        module._running = True
+        task = asyncio.create_task(module._message_loop())
+        await asyncio.sleep(0.05)
+        module._running = False
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_get_output_exists(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(MotionModule, "Mo", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        assert hasattr(module, "get_output")
+        assert hasattr(module, "_output_queue")

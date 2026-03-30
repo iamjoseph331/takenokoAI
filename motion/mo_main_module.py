@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from interface.bus import FamilyPrefix, MessageBus
@@ -33,6 +34,17 @@ class MotionModule(MainModule):
             FamilyPrefix.Mo, bus, logger, llm_config, permissions,
             prompt_assembler=prompt_assembler,
         )
+        self._output_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    async def get_output(self, *, timeout: float = 30.0) -> str:
+        """Wait for the next output produced by this module.
+
+        Used by external runners (e.g. chat loop) to receive Mo's output
+        after a cognition cycle completes.
+
+        Raises asyncio.TimeoutError if no output arrives within *timeout* seconds.
+        """
+        return await asyncio.wait_for(self._output_queue.get(), timeout=timeout)
 
     async def speak(
         self, content: str, *, channel: str = "default"
@@ -67,8 +79,17 @@ class MotionModule(MainModule):
         )
 
     async def _message_loop(self) -> None:
-        """Listen for action directives from Re, Ev, and Pr."""
-        raise NotImplementedError("MotionModule._message_loop")
+        """Listen for action directives from Re, Ev, and Pr.
+
+        Stage 1: idle loop — receives and acks messages (not yet implemented).
+        """
+        self._logger.action("_message_loop started (Stage 1: idle)")
+        while self._running:
+            try:
+                message = await self._bus.receive(self.qualified_name, timeout=1.0)
+            except (TimeoutError, asyncio.TimeoutError):
+                continue
+            await self.send_ack(message)
 
     async def get_resources(self) -> dict[str, Any]:
         raise NotImplementedError("MotionModule.get_resources")
