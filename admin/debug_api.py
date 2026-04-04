@@ -11,6 +11,9 @@ Endpoints:
   POST /inject               → send a raw BusMessage to any family
   POST /talk/{prefix}        → send text to a family's LLM and get the response
   POST /ask                  → ask Pr (or any family) a question using live context
+  GET  /models               → list available models from Ollama
+  GET  /families/models      → current model config per family
+  POST /family/{prefix}/model → change model (and optionally temperature) for a family
 
 Usage:
   dbg = DebugServer(port=7901)
@@ -40,6 +43,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +84,11 @@ class TalkRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, description="Question for the agent")
     target: str = Field(default="Pr", description="Family to ask (default: Pr)")
+
+
+class ModelChangeRequest(BaseModel):
+    model: str = Field(..., description="Model name (e.g. 'ollama/gemma4')")
+    temperature: float | None = Field(None, description="Optional temperature override")
 
 
 # ── DebugServer ──────────────────────────────────────────────────────────────
@@ -413,6 +422,85 @@ class DebugServer:
                     "queue_depths": queue_depths,
                     "family_states": family_states,
                 },
+            }
+
+        # ── GET /models ─────────────────────────────────────────────────────
+
+        @app.get("/models")
+        async def list_models() -> dict:
+            """List available models from Ollama's local API."""
+            ollama_url = "http://localhost:11434/api/tags"
+            models: list[dict[str, Any]] = []
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(ollama_url)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    for m in data.get("models", []):
+                        name = m.get("name", "")
+                        models.append({
+                            "name": f"ollama/{name}",
+                            "raw_name": name,
+                            "size": m.get("size"),
+                        })
+            except Exception as e:
+                return {
+                    "models": models,
+                    "error": f"Could not reach Ollama: {type(e).__name__}: {e}",
+                }
+            return {"models": models}
+
+        # ── GET /families/models ─────────────────────────────────────────────
+
+        @app.get("/families/models")
+        async def get_family_models() -> dict:
+            """Return current model configuration for all families."""
+            agent = _require_agent()
+            from interface.bus import FamilyPrefix
+
+            result: dict[str, dict[str, Any]] = {}
+            for prefix_str in KNOWN_FAMILIES:
+                try:
+                    module = agent.get_family(FamilyPrefix(prefix_str))
+                    cfg = module._llm._config
+                    result[prefix_str] = {
+                        "model": cfg.model_name,
+                        "temperature": cfg.temperature,
+                        "max_tokens": cfg.max_tokens,
+                    }
+                except (KeyError, ValueError):
+                    result[prefix_str] = {"model": "unknown", "temperature": 0, "max_tokens": 0}
+            return {"families": result}
+
+        # ── POST /family/{prefix}/model ──────────────────────────────────────
+
+        @app.post("/family/{prefix}/model")
+        async def change_family_model(prefix: str, body: ModelChangeRequest) -> dict:
+            """Change the LLM model (and optionally temperature) for a family."""
+            agent = _require_agent()
+            if prefix not in KNOWN_FAMILIES:
+                raise HTTPException(404, f"Unknown family: {prefix}")
+
+            from interface.bus import FamilyPrefix
+
+            try:
+                module = agent.get_family(FamilyPrefix(prefix))
+            except (KeyError, ValueError) as e:
+                raise HTTPException(404, str(e))
+
+            # Update model name
+            module._llm.update_config(model_name=body.model)
+
+            # Update temperature if provided
+            if body.temperature is not None:
+                module._llm.update_config(temperature=body.temperature)
+
+            cfg = module._llm._config
+            return {
+                "status": "ok",
+                "family": prefix,
+                "model": cfg.model_name,
+                "temperature": cfg.temperature,
             }
 
         return app
