@@ -110,13 +110,34 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Prompt A/B testing framework: swap prompts, run same scenarios, compare outputs
 - [ ] Model comparison framework: swap models per family, run same scenarios, compare outputs
 
+### Done — Browser Interaction
+
+- [x] `BrowserSession` — Playwright wrapper (start/stop/click/type/screenshot/DOM snapshot)
+- [x] `Re.browser` submodule — general browser perception (DOM + screenshot capture)
+- [x] `Mo.browser` submodule — general browser action (click/type/navigate/wait/js)
+- [x] Browser wiring in `run_agent.py` (config-driven, optional)
+- [x] `default.yaml` browser config section
+- [x] Submodule dispatch in Re.main and Mo.main for browser messages
+- [x] 30 browser tests (BrowserSession, Re.browser, Mo.browser, dispatch)
+
+### To Do — Game Rule Learning (Me.rules)
+
+- [x] `Me.rules` submodule placeholder — basic add/get/query/clear rule storage
+- [ ] Structured rule entries: rule text, source (user/inferred), confidence, game name
+- [ ] LLM-powered rule query: given a game state, find relevant rules via semantic matching
+- [ ] Rule refinement: update confidence or text when play experience contradicts a rule
+- [ ] Rule conflict detection: flag when new rules contradict existing ones, ask user
+- [ ] Multi-game support: store rules per game, switch context when game changes
+- [ ] Rule persistence: save/load rules to disk across sessions
+- [ ] Rule injection into Pr/Ev context: automatically include relevant rules when reasoning about moves
+- [ ] Learning flow: user explains rules → Pr summarizes → Me.rules stores → Ev validates during play
+
 ### To Do — Game Integration
 
-- [ ] Design `GameAdapter` interface (translates game engine ↔ Re/Mo text-based I/O)
-- [ ] Implement Tic-Tac-Toe adapter
-- [ ] Implement Poker adapter
-- [ ] Implement Uno adapter
-- [ ] End-to-end test: agent plays a full game of Tic-Tac-Toe
+- [ ] End-to-end test: agent learns rules via conversation, then plays a browser game
+- [ ] Turn detection: agent recognizes when it's their turn from browser state
+- [ ] Move generation: Pr proposes moves based on rules in Me, Ev evaluates legality
+- [ ] Game session management: start/end game, reset rules, track score
 
 ---
 
@@ -153,9 +174,11 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Configurable cognition paths via YAML (not hardcoded in bus.py)
 - [ ] Event sourcing on bus (append-only message log for replay/analysis)
 - [ ] Circuit-breaker pattern for LLM failures
+- [x] Re sub-module: Browser (general Playwright perception)
 - [ ] Re sub-modules: Vision, Audio, Net-Search (for web/VR per Q6 answer)
 - [ ] Pr sub-module: Plan
+- [x] Me sub-module: Rules (placeholder — game rule memory)
 - [ ] Me sub-modules: Short-term, Long-term, Logs
-- [ ] Admin visualization app (WebSocket live view)
+- [x] Admin visualization app (WebSocket live view)
 - [ ] Multi-agent scenarios (multiple TakenokoAI instances)
 - [ ] Persistent message counter across restarts

@@ -50,6 +50,11 @@ resources:
     Me: 5
     Mo: 5
 
+browser:
+  enabled: false
+  headless: true
+  url: ""
+
 api_key_envs:
   openai: TAKENOKO_OPENAI_KEY
   anthropic: TAKENOKO_ANTHROPIC_KEY

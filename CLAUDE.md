@@ -124,3 +124,4 @@ Three resource types: **token count**, **thinking time**, and **RAM**. Tracking 
 - Log everything — what each module is doing and when, every thought, every message
 - Each module can access everything within its own folder freely
 - Maintain `lessons.md` (`.claude/lessons.md`) for development learnings
+- **Revise `TODO.md` every time a task is finished** — mark completed items `[x]`, add new items discovered during implementation, keep the list accurate and current

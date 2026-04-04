@@ -12,7 +12,9 @@
       "Bash(xxd /Users/macbook/Code/Sideprojects/TakenokoAI/admin/visualization_app.py)",
       "Bash(ollama list:*)",
       "Bash(python:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(pip3 install:*)"
     ]
   }
 }

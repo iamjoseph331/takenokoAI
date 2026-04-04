@@ -26,6 +26,16 @@ from main import TakenokoAgent  # noqa: E402
 from motion.mo_main_module import MotionModule  # noqa: E402
 from reaction.re_main_module import ReactionModule  # noqa: E402
 
+# Browser submodule imports (optional — only used when browser is enabled)
+_BROWSER_AVAILABLE = True
+try:
+    from interface.browser_session import BrowserSession  # noqa: E402
+    from reaction.re_submodules.re_browser import BrowserSubmodule  # noqa: E402
+    from motion.mo_submodules.mo_browser import BrowserActionSubmodule  # noqa: E402
+    from memorization.me_submodules.me_rules import RulesSubmodule  # noqa: E402
+except ImportError:
+    _BROWSER_AVAILABLE = False
+
 
 async def _readline_async() -> str:
     """Read a line from stdin without blocking the event loop."""
@@ -119,6 +129,42 @@ async def amain(
     print("[runner] Agent started.")
 
     stop_event = asyncio.Event()
+    browser_session: Any = None
+
+    # ── Optionally attach browser submodules ──────────────────────────────
+    browser_cfg = agent._config.get("browser", {})
+    if browser_cfg.get("enabled") and _BROWSER_AVAILABLE:
+        try:
+            headless = browser_cfg.get("headless", True)
+            url = browser_cfg.get("url", "")
+
+            if not url:
+                print("[runner] Browser enabled but no URL configured — skipping.")
+            else:
+                browser_session = BrowserSession(headless=headless)
+                await browser_session.start(url)
+
+                re_module = agent.get_family(FamilyPrefix.Re)
+                mo_module = agent.get_family(FamilyPrefix.Mo)
+                me_module = agent.get_family(FamilyPrefix.Me)
+
+                re_browser = BrowserSubmodule(parent=re_module, session=browser_session)
+                await re_browser.start()
+
+                mo_browser = BrowserActionSubmodule(parent=mo_module, session=browser_session)
+                await mo_browser.start()
+
+                me_rules = RulesSubmodule(parent=me_module)
+                await me_rules.start()
+
+                print(f"[runner] Browser    → {url} (headless={headless})")
+        except Exception as e:
+            print(f"[runner] Browser disabled: {e}")
+            if browser_session and browser_session.is_running:
+                await browser_session.stop()
+                browser_session = None
+    elif browser_cfg.get("enabled") and not _BROWSER_AVAILABLE:
+        print("[runner] Browser enabled but playwright not installed — skipping.")
 
     coros: list = [
         _run_agent_loops(agent, stop_event),
@@ -163,6 +209,8 @@ async def amain(
         pass
     finally:
         stop_event.set()
+        if browser_session and browser_session.is_running:
+            await browser_session.stop()
         await agent.stop()
         print("[runner] Shutdown complete.")
 

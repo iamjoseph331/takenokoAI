@@ -53,6 +53,9 @@ class ReactionModule(MainModule):
     async def perceive(self, input_data: dict[str, Any]) -> str:
         """Process raw input and route it along the appropriate cognition path.
 
+        If the input has source=browser and Re.browser is registered,
+        delegates observation to the browser submodule first.
+
         Uses the LLM to classify the input, then sends a message to the
         target family determined by the cognition path. Returns the message ID.
         """
@@ -60,6 +63,19 @@ class ReactionModule(MainModule):
             "perceive called",
             data={"input_preview": str(input_data)[:200]},
         )
+
+        # If this is a browser observation request, delegate to Re.browser
+        if (
+            isinstance(input_data, dict)
+            and input_data.get("source") == "browser"
+            and input_data.get("action") == "observe"
+            and "browser" in self._submodules
+        ):
+            browser_sub = self._submodules["browser"]
+            from reaction.re_submodules.re_browser import BrowserSubmodule
+            if isinstance(browser_sub, BrowserSubmodule):
+                state = await browser_sub.observe()
+                input_data = state  # Replace with structured game state
 
         path = await self.classify_input(input_data)
 

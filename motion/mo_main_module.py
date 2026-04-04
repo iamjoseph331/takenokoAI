@@ -77,10 +77,23 @@ class MotionModule(MainModule):
         return await asyncio.wait_for(self._output_queue.get(), timeout=timeout)
 
     async def _handle_message(self, message: BusMessage) -> None:
-        """Handle action directives from Re, Ev, and Pr."""
+        """Handle action directives from Re, Ev, and Pr.
+
+        If the action targets the browser and Mo.browser is registered,
+        delegates to the browser submodule.
+        """
         body = message.body or {}
 
         if isinstance(body, dict):
+            # Delegate browser actions to Mo.browser submodule
+            if (
+                body.get("action") in ("move", "click", "type", "navigate", "wait")
+                and body.get("target") == "browser"
+                and "browser" in self._submodules
+            ):
+                await self._submodules["browser"].handle_message(message)
+                return
+
             # Check for explicit action
             action = body.get("action")
             if action and action not in ("store",):
