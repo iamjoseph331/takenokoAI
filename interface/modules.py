@@ -19,6 +19,7 @@ from interface.bus import (
     MessageBus,
     QueueFullSignal,
 )
+from interface.capabilities import Capability
 from interface.llm import LLMClient, LLMConfig
 from interface.logging import ModuleLogger
 from interface.permissions import PermissionAction, PermissionManager
@@ -239,9 +240,32 @@ class MainModule(BaseModule):
             del self._submodules[name]
             self._logger.action(f"Sub-module unregistered: {name}")
 
-    def list_submodules(self) -> dict[str, dict[str, str]]:
+    def list_submodules(self) -> dict[str, dict[str, Any]]:
         """Return capability descriptors for all registered sub-modules."""
         return {name: sub.announce() for name, sub in self._submodules.items()}
+
+    def find_capability(self, capability_name: str) -> SubModule | None:
+        """Find the submodule that provides a given capability.
+
+        Searches all registered submodules for one that declares a
+        capability with the given name. Returns None if not found.
+        """
+        for sub in self._submodules.values():
+            for cap in sub.capabilities():
+                if cap.name == capability_name:
+                    return sub
+        return None
+
+    def list_capabilities(self) -> list[dict[str, Any]]:
+        """Return a flat list of all capabilities across all submodules."""
+        caps: list[dict[str, Any]] = []
+        for sub in self._submodules.values():
+            for cap in sub.capabilities():
+                entry = cap.to_dict()
+                entry["submodule"] = sub.name
+                entry["qualified_name"] = sub.qualified_name
+                caps.append(entry)
+        return caps
 
     # ── State management ──
 
@@ -276,14 +300,24 @@ class MainModule(BaseModule):
     # and hot-swap path stay in sync. The resolver would read from YAML at boot
     # and validate the same constraints on hot-swap.
 
-    async def change_prompt(self, requester: FamilyPrefix) -> None:
-        """Reassemble the system prompt from all sources. Requires permission."""
+    async def change_prompt(
+        self, prompt_path: str | None = None, *, requester: FamilyPrefix
+    ) -> None:
+        """Change or reassemble the system prompt. Requires permission.
+
+        Args:
+            prompt_path: Optional new prompt file path. If provided, updates
+                the config's system_prompt_path before reloading.
+            requester: The family requesting the change.
+        """
         if not self._permissions.check(
             requester, PermissionAction.CHANGE_PROMPT, self.family_prefix.value
         ):
             raise PermissionError(
                 f"{requester} lacks CHANGE_PROMPT on {self.family_prefix}"
             )
+        if prompt_path is not None:
+            self._llm.config.system_prompt_path = prompt_path
         await self._llm.reload_system_prompt()
 
     async def change_model(self, model_name: str, requester: FamilyPrefix) -> None:
@@ -345,11 +379,16 @@ class SubModule(BaseModule):
 
     Sub-modules attach to a parent MainModule and announce their
     capabilities via the self-registration protocol (申告制).
-    """
 
-    # TODO: Add start()/stop() lifecycle hooks with setup/teardown for
-    # SubModules (e.g. loading embedding indices for Me submodules,
-    # initializing audio streams for Re submodules).
+    Each submodule declares its capabilities — named actions it can
+    perform — via the capabilities() method. Other modules discover
+    and invoke these through a standardized interface, similar to how
+    tools work in Claude Code.
+
+    To add a capability named "foo":
+      1. Include Capability(name="foo", ...) in capabilities()
+      2. Implement async def _invoke_foo(self, params: dict) -> dict
+    """
 
     def __init__(
         self,
@@ -370,19 +409,65 @@ class SubModule(BaseModule):
         self.description = description
         parent.register_submodule(self)
 
-    def announce(self) -> dict[str, str]:
+    # ── Capability system ──
+
+    @abstractmethod
+    def capabilities(self) -> list[Capability]:
+        """Declare the capabilities this submodule provides.
+
+        Each capability maps to an _invoke_{name} method. Override
+        this to register what this submodule can do.
+        """
+        raise NotImplementedError("Subclasses must declare capabilities()")
+
+    async def invoke(self, capability_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Invoke a capability by name.
+
+        Dispatches to _invoke_{capability_name}(params). Returns a result
+        dict with at least {"status": "ok"|"error"}.
+        """
+        handler = getattr(self, f"_invoke_{capability_name}", None)
+        if handler is None:
+            return {"status": "error", "reason": f"Unknown capability: {capability_name}"}
+        try:
+            return await handler(params or {})
+        except Exception as e:
+            self._logger.action(
+                f"Capability {capability_name} failed: {type(e).__name__}: {e}"
+            )
+            return {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+
+    def announce(self) -> dict[str, Any]:
         """Return a capability descriptor for self.md registration."""
         return {
             "name": self.name,
             "family": self.family_prefix.value,
             "description": self.description,
             "qualified_name": self.qualified_name,
+            "capabilities": [c.to_dict() for c in self.capabilities()],
         }
 
-    @abstractmethod
+    # ── Message handling ──
+
     async def handle_message(self, message: BusMessage) -> Optional[BusMessage]:
-        """Process an incoming message. Return a response message or None."""
-        raise NotImplementedError("Subclasses must implement handle_message()")
+        """Process an incoming message.
+
+        Default implementation routes capability invocations:
+          {"capability": "name", "params": {...}} → invoke(name, params)
+
+        Subclasses can override for custom message handling but should
+        call super().handle_message() for capability dispatch.
+        """
+        body = message.body
+        if isinstance(body, dict) and "capability" in body:
+            cap_name = body["capability"]
+            params = body.get("params", {})
+            result = await self.invoke(cap_name, params)
+            self._logger.action(
+                f"Capability invoked: {cap_name} -> {result.get('status', '?')}"
+            )
+            return None
+        return None
 
     async def start(self) -> None:
         self._logger.action(f"Sub-module {self.qualified_name} started")

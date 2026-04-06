@@ -81,6 +81,7 @@ class LLMConfig:
     model_name: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
+    system_prompt_path: str | None = None
     extra_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -114,16 +115,36 @@ class LLMClient:
         return self._config
 
     async def load_system_prompt(self) -> str:
-        """Build the system prompt via the PromptAssembler. Caches result."""
+        """Load the system prompt. Caches result.
+
+        Resolution order:
+          1. PromptAssembler (if provided) — assembles from multiple sources
+          2. system_prompt_path in config — reads a single file
+          3. Empty string
+        """
         if self._system_prompt_cache is not None:
             return self._system_prompt_cache
 
-        if self._prompt_assembler is None:
-            self._system_prompt_cache = ""
-            return ""
+        if self._prompt_assembler is not None:
+            self._system_prompt_cache = await self._prompt_assembler.assemble()
+            return self._system_prompt_cache
 
-        self._system_prompt_cache = await self._prompt_assembler.assemble()
-        return self._system_prompt_cache
+        # Fall back to reading system_prompt_path directly
+        path = self._config.system_prompt_path
+        if path:
+            try:
+                from pathlib import Path
+
+                content = Path(path).read_text(encoding="utf-8")
+                self._system_prompt_cache = content
+                return content
+            except (OSError, FileNotFoundError):
+                self._logger.action(f"System prompt file not found: {path}")
+                self._system_prompt_cache = ""
+                return ""
+
+        self._system_prompt_cache = ""
+        return ""
 
     async def reload_system_prompt(self) -> str:
         """Force-reload the system prompt (re-reads all sources from disk)."""
@@ -215,3 +236,6 @@ class LLMClient:
                 self._logger.action(f"LLM config updated: {key}={value}")
             else:
                 raise ValueError(f"Unknown LLM config key: {key!r}")
+        # Invalidate prompt cache when prompt source changes
+        if "system_prompt_path" in kwargs:
+            self._system_prompt_cache = None

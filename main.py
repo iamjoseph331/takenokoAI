@@ -213,6 +213,7 @@ class TakenokoAgent:
             model_name=family_cfg.get("model", "gpt-4o"),
             temperature=family_cfg.get("temperature", 0.7),
             max_tokens=family_cfg.get("max_tokens", 4096),
+            system_prompt_path=family_cfg.get("prompt"),
         )
 
     def _build_prompt_assembler(

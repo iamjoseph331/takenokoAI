@@ -37,6 +37,9 @@ class ConcreteMainModule(MainModule):
 class ConcreteSubModule(SubModule):
     """Concrete SubModule for testing."""
 
+    def capabilities(self) -> list:
+        return []
+
     async def handle_message(self, message: BusMessage) -> Optional[BusMessage]:
         return None
 
@@ -299,6 +302,7 @@ class TestSubModule:
             "family": "Re",
             "description": "Processes images",
             "qualified_name": "Re.vision",
+            "capabilities": [],
         }
 
     def test_auto_registers_with_parent(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
