@@ -128,27 +128,33 @@ async def amain(
     # ── Optionally attach visualization ────────────────────────────────────
     if not no_viz:
         try:
-            from admin.visualization_app import VizBroadcaster
-        except ImportError:
-            from visualization_app import VizBroadcaster  # type: ignore[no-redef]
+            try:
+                from admin.visualization_app import VizBroadcaster
+            except ImportError:
+                from visualization_app import VizBroadcaster  # type: ignore[no-redef]
 
-        families_dict = {p.value: m for p, m in agent._families.items()}
-        viz = VizBroadcaster(port=viz_port, families=families_dict)
-        viz.attach(agent._bus)  # type: ignore[arg-type]
-        print(f"[runner] Visualization → http://localhost:{viz_port}")
-        coros.append(_run_server(viz, stop_event))
+            families_dict = {p.value: m for p, m in agent._families.items()}
+            viz = VizBroadcaster(port=viz_port, families=families_dict)
+            viz.attach(agent._bus)  # type: ignore[arg-type]
+            print(f"[runner] Visualization → http://localhost:{viz_port}")
+            coros.append(_run_server(viz, stop_event))
+        except Exception as e:
+            print(f"[runner] Visualization disabled: {e}")
 
     # ── Optionally attach debug API ───────────────────────────────────────
     if not no_debug:
         try:
-            from admin.debug_api import DebugServer
-        except ImportError:
-            from debug_api import DebugServer  # type: ignore[no-redef]
+            try:
+                from admin.debug_api import DebugServer
+            except ImportError:
+                from debug_api import DebugServer  # type: ignore[no-redef]
 
-        dbg = DebugServer(port=debug_port)
-        dbg.attach(agent._bus, agent)  # type: ignore[arg-type]
-        print(f"[runner] Debug API    → http://localhost:{debug_port}")
-        coros.append(_run_server(dbg, stop_event))
+            dbg = DebugServer(port=debug_port)
+            dbg.attach(agent._bus, agent)  # type: ignore[arg-type]
+            print(f"[runner] Debug API    → http://localhost:{debug_port}")
+            coros.append(_run_server(dbg, stop_event))
+        except Exception as e:
+            print(f"[runner] Debug API disabled: {e}")
 
     # ── Run everything concurrently ────────────────────────────────────────
     try:

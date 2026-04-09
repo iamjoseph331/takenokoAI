@@ -8,7 +8,13 @@
       "Bash(python -c \"from interface.markdown_utils import parse_markdown_sections; print\\(''markdown_utils OK''\\)\")",
       "Bash(python -c \"from interface.llm import LLMConfig, LLMClient; print\\(''llm OK''\\)\")",
       "Bash(python -c \"from interface.prompt_assembler import PromptAssembler; print\\(''prompt_assembler OK''\\)\")",
-      "Bash(python -c \"from interface.character_model import CharacterModel; print\\(''character_model OK''\\)\")"
+      "Bash(python -c \"from interface.character_model import CharacterModel; print\\(''character_model OK''\\)\")",
+      "Bash(xxd /Users/macbook/Code/Sideprojects/TakenokoAI/admin/visualization_app.py)",
+      "Bash(ollama list:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(git:*)"
     ]
   }
 }

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from interface.bus import MessageBus
@@ -12,24 +15,19 @@ from interface.permissions import PermissionManager
 
 @pytest.fixture
 def mock_logger() -> ModuleLogger:
-    """A ModuleLogger instance scoped to the test-system family."""
-    return ModuleLogger("TS", "test")
+    return ModuleLogger("TEST", "fixture")
 
 
 @pytest.fixture
 def mock_bus(mock_logger: ModuleLogger) -> MessageBus:
-    """A MessageBus with per-family queue limits matching default.yaml."""
-    queue_limits = {"Pr": 10, "Re": 5, "Ev": 5, "Me": 5, "Mo": 5}
-    return MessageBus(mock_logger, queue_limits=queue_limits)
-
-
-@pytest.fixture
-def mock_permissions(mock_logger: ModuleLogger) -> PermissionManager:
-    """A PermissionManager with default grants."""
-    return PermissionManager(mock_logger)
+    return MessageBus(mock_logger)
 
 
 @pytest.fixture
 def mock_llm_config() -> LLMConfig:
-    """An LLMConfig with default values."""
-    return LLMConfig()
+    return LLMConfig(model_name="test-model", temperature=0.0, max_tokens=100)
+
+
+@pytest.fixture
+def mock_permissions(mock_logger: ModuleLogger) -> PermissionManager:
+    return PermissionManager(mock_logger)

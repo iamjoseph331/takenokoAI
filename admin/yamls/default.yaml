@@ -8,31 +8,31 @@ agent:
 
 families:
   Re:
-    model: gpt-4o
+    model: ollama/gemma4
     temperature: 0.7
     max_tokens: 4096
     identity_prompt: prompts/identity/re_identity.md
     rulebook: reaction/re_rulebook.md
   Pr:
-    model: gpt-4o
+    model: ollama/gemma4
     temperature: 0.5
     max_tokens: 8192
     identity_prompt: prompts/identity/pr_identity.md
     rulebook: prediction/pr_rulebook.md
   Ev:
-    model: gpt-4o
+    model: ollama/gemma4
     temperature: 0.3
     max_tokens: 4096
     identity_prompt: prompts/identity/ev_identity.md
     rulebook: evaluation/ev_rulebook.md
   Me:
-    model: gpt-4o
+    model: ollama/gemma4
     temperature: 0.2
     max_tokens: 4096
     identity_prompt: prompts/identity/me_identity.md
     rulebook: memorization/me_rulebook.md
   Mo:
-    model: gpt-4o
+    model: ollama/gemma4
     temperature: 0.7
     max_tokens: 2048
     identity_prompt: prompts/identity/mo_identity.md
@@ -49,6 +49,31 @@ resources:
     Ev: 5
     Me: 5
     Mo: 5
+
+# Submodules: decoupled from main modules, depend only on interfaces.
+# Set enabled: true to activate. Policy: WAIT | RETRY | DROP.
+submodules:
+  Re:
+    browser:
+      enabled: false
+      policy: WAIT
+    audio:
+      enabled: false
+      policy: RETRY
+      max_retries: 3
+      stt: {}
+  Mo:
+    browser:
+      enabled: false
+      policy: WAIT
+    audio:
+      enabled: false
+      policy: DROP
+      tts: {}
+  Me:
+    rules:
+      enabled: false
+      policy: WAIT
 
 api_key_envs:
   openai: TAKENOKO_OPENAI_KEY

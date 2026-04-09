@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>TakenokoAI — Agent Visualizer</title>
+<title>TakenokoAI Visualizer</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,38 +19,110 @@ body {
   border-bottom: 1px solid #30363d; flex-shrink: 0;
   font-size: 12px;
 }
-#brand {
-  font-weight: bold; font-size: 14px;
-  background: linear-gradient(135deg, #79c0ff, #58a6ff, #ff7b72);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text; letter-spacing: 0.5px;
-}
 #conn-dot {
   width: 10px; height: 10px; border-radius: 50%;
   background: #da3633; transition: background 0.3s;
 }
 #conn-dot.ok { background: #3fb950; }
 #conn-label { color: #8b949e; }
+#title-label { color: #a5d6ff; flex: 1; font-weight: bold; }
 .stat { color: #8b949e; }
 .stat span { color: #e6edf3; }
-.spacer { flex: 1; }
+
+/* ── Tab bar ── */
+#tab-bar {
+  display: flex; gap: 0; background: #161b22;
+  border-bottom: 1px solid #30363d; flex-shrink: 0;
+  padding: 0 16px;
+}
+.tab-btn {
+  padding: 8px 20px; font-size: 12px;
+  background: transparent; color: #8b949e; border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer; font-family: inherit;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab-btn:hover { color: #e6edf3; }
+.tab-btn.active { color: #e6edf3; border-bottom-color: #58a6ff; }
 
 /* ── Main area ── */
-#main {
-  display: flex; flex: 1; overflow: hidden;
+#main { display: flex; flex: 1; overflow: hidden; }
+.tab-content { display: none; }
+.tab-content.active { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Models tab ── */
+#models-tab {
+  flex-direction: column; padding: 24px;
+  overflow-y: auto; gap: 16px;
+}
+#models-tab h2 {
+  font-size: 16px; color: #e6edf3; margin-bottom: 4px;
+}
+#models-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+#models-header button {
+  padding: 6px 14px; font-size: 11px;
+  background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+  border-radius: 6px; cursor: pointer; font-family: inherit;
+  transition: background 0.2s;
+}
+#models-header button:hover { background: #30363d; }
+#model-cards {
+  display: flex; flex-wrap: wrap; gap: 16px;
+}
+.model-card {
+  background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+  padding: 16px; width: 280px; display: flex; flex-direction: column; gap: 10px;
+  border-left: 3px solid #58a6ff;
+}
+.model-card h3 {
+  font-size: 14px; margin: 0;
+  display: flex; align-items: center; gap: 8px;
+}
+.model-card h3 .dot {
+  width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+}
+.model-card label {
+  font-size: 11px; color: #8b949e; display: block; margin-bottom: 3px;
+}
+.model-card select, .model-card input {
+  width: 100%; padding: 6px 8px; font-size: 12px;
+  background: #0d1117; color: #e6edf3; border: 1px solid #30363d;
+  border-radius: 4px; font-family: inherit;
+}
+.model-card select:focus, .model-card input:focus {
+  outline: none; border-color: #58a6ff;
+}
+.model-card .card-row {
+  display: flex; gap: 8px; align-items: flex-end;
+}
+.model-card .card-row > div { flex: 1; }
+.model-card .apply-btn {
+  padding: 6px 16px; font-size: 11px; font-weight: bold;
+  background: #238636; color: white; border: none;
+  border-radius: 6px; cursor: pointer; font-family: inherit;
+  transition: background 0.2s; align-self: flex-start;
+}
+.model-card .apply-btn:hover { background: #2ea043; }
+.model-card .apply-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-card .status-msg {
+  font-size: 10px; min-height: 14px;
+}
+.model-card .status-msg.ok { color: #3fb950; }
+.model-card .status-msg.err { color: #da3633; }
+#ollama-error {
+  color: #d29922; font-size: 12px; padding: 8px 12px;
+  background: #1c1d00; border: 1px solid #3d3d00; border-radius: 6px;
 }
 
 /* ── Graph panel ── */
-#graph-panel {
-  flex: 1; position: relative; overflow: hidden;
-}
-#graph-svg {
-  width: 100%; height: 100%;
-}
+#graph-panel { flex: 1; position: relative; overflow: hidden; }
+#graph-svg { width: 100%; height: 100%; }
 
 /* ── Right panel ── */
 #right-panel {
-  width: 380px; background: #161b22;
+  width: 340px; background: #161b22;
   border-left: 1px solid #30363d;
   display: flex; flex-direction: column;
   overflow: hidden; flex-shrink: 0;
@@ -65,210 +137,60 @@ body {
   font-size: 10.5px; line-height: 1.6; min-height: 0;
 }
 #msg-feed::-webkit-scrollbar { width: 4px; }
-#msg-feed::-webkit-scrollbar-track { background: transparent; }
 #msg-feed::-webkit-scrollbar-thumb { background: #30363d; }
 .feed-entry {
   padding: 2px 12px;
   border-left: 2px solid transparent;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: default;
 }
 .feed-entry:hover { background: #1c2128; }
-.feed-entry.pinned-in-feed { background: #131d2e !important; border-left-width: 3px; }
-.feed-entry.new { animation: flash 0.5s ease-out; }
+.feed-entry.is-ack { opacity: 0.35; }
+.feed-entry.new { animation: flash 0.4s ease-out; }
 @keyframes flash { from { background: #1f2937; } to { background: transparent; } }
 
-/* ── Pinned messages section ── */
-#pinned-section {
+/* ── Broadcasts strip ── */
+#broadcast-strip {
+  flex-shrink: 0; background: #0d1117;
   border-top: 1px solid #30363d;
-  display: none;
-  flex-direction: column;
-  max-height: 52%;
-  flex-shrink: 0;
+  max-height: 120px; overflow-y: auto;
+  padding: 4px 0;
 }
-#pinned-section.has-pins { display: flex; }
-#pinned-header {
-  display: flex; align-items: center; gap: 6px;
-  padding: 7px 14px; font-size: 11px; color: #8b949e;
+#broadcast-strip h4 {
+  padding: 4px 12px; font-size: 10px; color: #6e7681;
   text-transform: uppercase; letter-spacing: 1px;
-  background: #161b22;
-  border-bottom: 1px solid #30363d; flex-shrink: 0;
 }
-#pinned-count {
-  background: #21262d; border-radius: 10px;
-  padding: 0 6px; font-size: 9px; color: #e6edf3;
-}
-#clear-pins {
-  margin-left: auto; font-size: 9px; background: none;
-  border: 1px solid #30363d; border-radius: 3px;
-  color: #8b949e; cursor: pointer; padding: 1px 6px;
-}
-#clear-pins:hover { color: #e6edf3; border-color: #8b949e; }
-#pinned-list {
-  overflow-y: auto; padding: 0;
-}
-#pinned-list::-webkit-scrollbar { width: 4px; }
-#pinned-list::-webkit-scrollbar-track { background: transparent; }
-#pinned-list::-webkit-scrollbar-thumb { background: #30363d; }
-.pinned-entry {
-  padding: 7px 30px 7px 12px;
-  border-left: 2px solid transparent;
-  border-bottom: 1px solid #21262d;
-  font-size: 10px; line-height: 1.5;
-  position: relative;
-}
-.pinned-entry:last-child { border-bottom: none; }
-.pinned-entry-header {
-  display: flex; align-items: baseline; gap: 6px;
-  font-size: 10.5px; margin-bottom: 3px;
-}
-.pinned-entry-route { font-weight: bold; }
-.pinned-entry-id    { color: #6e7681; font-size: 9px; font-family: monospace; }
-.pinned-entry-time  { color: #6e7681; font-size: 9px; }
-.pinned-entry-detail {
-  color: #c9d1d9; font-size: 9.5px;
-  white-space: pre-wrap; word-break: break-all;
-  padding-left: 2px;
-}
-.unpin-btn {
-  position: absolute; top: 6px; right: 8px;
-  background: none; border: none; color: #6e7681;
-  cursor: pointer; font-size: 14px; padding: 0 2px;
-  line-height: 1;
-}
-.unpin-btn:hover { color: #e6edf3; }
-
-/* ── Task stack panel (floating, opens on node click) ── */
-#task-panel {
-  display: none;
-  position: absolute;
-  top: 12px; left: 12px;
-  width: 320px;
-  max-height: calc(100% - 24px);
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-  flex-direction: column;
-  z-index: 100;
-  overflow: hidden;
-}
-#task-panel.open { display: flex; }
-#task-panel-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px; flex-shrink: 0;
-  border-bottom: 1px solid #30363d;
-}
-#task-panel-title {
-  font-size: 12px; font-weight: bold; flex: 1;
-}
-#task-panel-count {
-  background: #21262d; border-radius: 10px;
-  padding: 0 6px; font-size: 9px; color: #8b949e;
-}
-#task-panel-close {
-  background: none; border: none; color: #6e7681;
-  cursor: pointer; font-size: 16px; padding: 0 2px;
-  line-height: 1; margin-left: 4px;
-}
-#task-panel-close:hover { color: #e6edf3; }
-#task-panel-list {
-  overflow-y: auto; padding: 4px 0; flex: 1;
-}
-#task-panel-list::-webkit-scrollbar { width: 4px; }
-#task-panel-list::-webkit-scrollbar-thumb { background: #30363d; }
-.task-row {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 5px 12px;
-  border-bottom: 1px solid #21262d;
-  font-size: 10px; line-height: 1.5;
-}
-.task-row:last-child { border-bottom: none; }
-.task-body { flex: 1; min-width: 0; }
-.task-sender { color: #6e7681; font-size: 9px; }
-.task-id { font-weight: bold; color: #e6edf3; font-family: monospace; font-size: 9px; }
-.task-detail {
-  color: #8b949e; font-size: 9px;
+.bc-entry {
+  padding: 1px 12px; font-size: 10px; color: #8b949e;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 240px;
 }
-.task-empty {
-  padding: 16px 12px; color: #6e7681; font-size: 10px; text-align: center;
-}
-
-/* ── Plan progress strip ── */
-#plan-progress-strip {
-  flex-shrink: 0;
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
-  padding: 6px 16px 7px;
-  height: 80px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-#plan-progress-strip::-webkit-scrollbar { width: 4px; }
-#plan-progress-strip::-webkit-scrollbar-track { background: transparent; }
-#plan-progress-strip::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
-#plan-progress-header {
-  font-size: 10px; color: #58a6ff;
-  letter-spacing: 1px; text-transform: uppercase;
-  margin-bottom: 5px;
-}
-.progress-bar-row {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 4px; min-height: 18px;
-}
-.progress-bar-row:last-child { margin-bottom: 0; }
-.progress-bar-label {
-  font-size: 9.5px; color: #8b949e;
-  width: 200px; min-width: 200px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  flex-shrink: 0;
-}
-.progress-bar-track {
-  flex: 1; height: 11px;
-  background: #21262d; border-radius: 5px; overflow: hidden;
-}
-.progress-bar-fill {
-  height: 100%; background: #58a6ff; border-radius: 5px;
-  transition: width 0.6s ease;
-  min-width: 0;
-}
-.progress-bar-pct {
-  font-size: 9px; color: #6e7681;
-  min-width: 30px; text-align: right; flex-shrink: 0;
-}
-.progress-bar-empty {
-  color: #30363d; font-size: 9.5px;
-  padding: 12px 0; text-align: center;
-}
+.bc-entry .bc-sender { color: #58a6ff; }
 
 /* ── Graph styles ── */
 .node-circle {
-  stroke: #30363d; stroke-width: 2;
+  stroke-width: 2;
   transition: filter 0.15s;
 }
 .node-circle.pulse {
-  filter: drop-shadow(0 0 12px currentColor);
+  filter: drop-shadow(0 0 14px var(--node-color));
 }
 .node-label {
   fill: white; font-size: 13px; font-weight: bold;
   text-anchor: middle; dominant-baseline: middle;
   pointer-events: none; user-select: none;
 }
-.node-sublabel {
-  fill: #8b949e; font-size: 8px;
-  text-anchor: middle; dominant-baseline: hanging;
-  pointer-events: none; user-select: none;
-}
-.slot-text {
+.node-sub {
   fill: #8b949e; font-size: 9px;
-  text-anchor: middle; dominant-baseline: hanging;
+  text-anchor: middle;
   pointer-events: none; user-select: none;
 }
-.queue-badge circle {
-  fill: #da3633; stroke: #0d1117; stroke-width: 1.5;
+.state-badge {
+  fill: #3fb950; font-size: 8px; font-weight: bold;
+  text-anchor: middle;
+  pointer-events: none; user-select: none;
 }
+.state-badge.thinking { fill: #f0c040; }
+.queue-badge circle { fill: #da3633; stroke: #0d1117; stroke-width: 1.5; }
 .queue-badge text {
   fill: white; font-size: 9px; font-weight: bold;
   text-anchor: middle; dominant-baseline: middle;
@@ -279,616 +201,463 @@ body {
 /* ── Edges ── */
 .edge-bg {
   stroke: #30363d; stroke-width: 1.5;
-  fill: none; opacity: 0.6;
+  fill: none; opacity: 0.5;
   marker-end: url(#arrow-gray);
 }
 .edge-flash {
   stroke-width: 3; fill: none; opacity: 0;
   pointer-events: none;
+  stroke-dasharray: 200;
   marker-end: url(#arrow-active);
 }
 .edge-flash.active {
-  animation: edgePulse 0.7s ease-out forwards;
+  animation: edgePulse 0.8s ease-out forwards;
 }
 @keyframes edgePulse {
-  0%   { opacity: 0.9; stroke-dashoffset: 200; }
-  60%  { opacity: 0.9; stroke-dashoffset: 0; }
-  100% { opacity: 0; stroke-dashoffset: 0; }
-}
-
-/* ── Family state indicators ── */
-.state-dot {
-  transition: fill 0.3s;
+  0%   { opacity: 0.95; stroke-dashoffset: 200; }
+  60%  { opacity: 0.9;  stroke-dashoffset: 0; }
+  100% { opacity: 0;    stroke-dashoffset: 0; }
 }
 </style>
 </head>
 <body>
 
-<!-- Top bar -->
 <div id="topbar">
-  <span id="brand">TakenokoAI</span>
   <div id="conn-dot"></div>
   <span id="conn-label">Disconnected</span>
-  <span class="spacer"></span>
-  <span class="stat">LLM calls: <span id="stat-calls">0</span></span>
-  <span class="stat">Tokens: <span id="stat-tokens">0</span></span>
+  <span id="title-label">TakenokoAI</span>
   <span class="stat">Uptime: <span id="stat-uptime">0s</span></span>
-  <span class="stat">Clients: <span id="stat-clients">0</span></span>
+  <span class="stat">Messages: <span id="stat-msgs">0</span></span>
 </div>
 
-<!-- Plan task progress strip -->
-<div id="plan-progress-strip">
-  <div id="plan-progress-header">Prediction Tasks</div>
-  <div id="plan-progress-bars"></div>
+<div id="tab-bar">
+  <button class="tab-btn active" data-tab="graph-tab">Graph</button>
+  <button class="tab-btn" data-tab="models-tab">Models</button>
 </div>
 
-<!-- Main -->
 <div id="main">
-  <div id="graph-panel">
-    <svg id="graph-svg"></svg>
-    <div id="task-panel">
-      <div id="task-panel-header">
-        <span id="task-panel-title">module</span>
-        <span id="task-panel-count">0 tasks</span>
-        <button id="task-panel-close">&times;</button>
+  <div id="graph-tab" class="tab-content active">
+    <div id="graph-panel">
+      <svg id="graph-svg"></svg>
+    </div>
+
+    <div id="right-panel">
+      <h3>Message Feed <small style="font-weight:normal;color:#6e7681;text-transform:none;letter-spacing:0;font-size:9px">(acks dimmed)</small></h3>
+      <div id="msg-feed"></div>
+      <div id="broadcast-strip">
+        <h4>Broadcasts</h4>
+        <div id="bc-list"></div>
       </div>
-      <div id="task-panel-list"></div>
     </div>
   </div>
-  <div id="right-panel">
-    <h3>Message Feed <small style="font-weight:normal;color:#6e7681;text-transform:none;letter-spacing:0;font-size:9px"> &mdash; click to pin</small></h3>
-    <div id="msg-feed"></div>
-    <div id="pinned-section">
-      <div id="pinned-header">
-        <span>Pinned</span>
-        <span id="pinned-count">0</span>
-        <button id="clear-pins">clear all</button>
-      </div>
-      <div id="pinned-list"></div>
+
+  <div id="models-tab" class="tab-content">
+    <div id="models-header">
+      <h2>Family Model Configuration</h2>
+      <button onclick="refreshModels()">Refresh Models</button>
     </div>
+    <div id="ollama-error" style="display:none"></div>
+    <div id="model-cards"></div>
   </div>
 </div>
 
 <script>
-// ─────────────────────────────────────────────
-// Configuration
-// ─────────────────────────────────────────────
-const WS_URL = new URLSearchParams(location.search).get('agent') || 'ws://localhost:7899/ws';
-const MAX_FEED = 120;
+const WS_URL = 'ws://localhost:7899/ws';
+const MAX_FEED = 100;
 
-// Family color map
-const FAMILY_COLORS = {
-  "Re": "#79c0ff",   // Reaction — cyan
-  "Pr": "#58a6ff",   // Prediction — blue
-  "Ev": "#ff7b72",   // Evaluation — red
-  "Me": "#f0f6fc",   // Memorization — white
-  "Mo": "#3fb950",   // Motion — green
-};
-
-// Full family names for display
-const FAMILY_NAMES = {
-  "Re": "Reaction",
-  "Pr": "Prediction",
-  "Ev": "Evaluation",
-  "Me": "Memorization",
-  "Mo": "Motion",
-};
-
-// Module definitions — pentagon-ish layout
-const MODULES = [
-  { id: "Re", label: "Re",  fullName: "Reaction",      color: "#79c0ff", x: 200, y: 150 },
-  { id: "Pr", label: "Pr",  fullName: "Prediction",     color: "#58a6ff", x: 450, y: 120 },
-  { id: "Ev", label: "Ev",  fullName: "Evaluation",     color: "#ff7b72", x: 700, y: 150 },
-  { id: "Me", label: "Me",  fullName: "Memorization",   color: "#f0f6fc", x: 280, y: 380 },
-  { id: "Mo", label: "Mo",  fullName: "Motion",         color: "#3fb950", x: 620, y: 380 },
+// ── Family definitions (positions for ~700×450 viewport) ──
+const FAMILIES = [
+  { id: "Re", label: "Re",  desc: "Reaction",    color: "#e3b341", x: 160, y: 225 },
+  { id: "Pr", label: "Pr",  desc: "Prediction",  color: "#58a6ff", x: 380, y: 140 },
+  { id: "Ev", label: "Ev",  desc: "Evaluation",  color: "#ff7b72", x: 580, y: 225 },
+  { id: "Me", label: "Me",  desc: "Memorization",color: "#c9d1d9", x: 380, y: 360 },
+  { id: "Mo", label: "Mo",  desc: "Motion",      color: "#3fb950", x: 580, y: 360 },
 ];
 
-const MODULE_MAP = {};
-MODULES.forEach(m => MODULE_MAP[m.id] = m);
+const FAM_MAP = {};
+FAMILIES.forEach(f => FAM_MAP[f.id] = f);
 
-// All known edges based on cognition paths:
-// P: [Ev,Pr], [Pr,Ev], [Ev,Mo], [Ev,Me]
-// R: [Re,Mo]
-// E: [Re,Ev]
-// U: [Re,Pr]
-// D: [Pr,Re], [Pr,Ev], [Pr,Mo], [Pr,Me]
-const KNOWN_EDGES = [
-  // P path — Deliberate thought
-  ["Ev","Pr"], ["Pr","Ev"], ["Ev","Mo"], ["Ev","Me"],
-  // R path — Reflex
-  ["Re","Mo"],
-  // E path — Appraisal
-  ["Re","Ev"],
-  // U path — Uptake
-  ["Re","Pr"],
-  // D path — Dispatch
-  ["Pr","Re"], ["Pr","Mo"], ["Pr","Me"],
-  // Note: [Pr,Ev] already in P path
+// Cognition path edges (all directed)
+const EDGES = [
+  // P path
+  { src:"Ev", dst:"Pr" }, { src:"Pr", dst:"Ev" },
+  { src:"Ev", dst:"Mo" }, { src:"Ev", dst:"Me" },
+  // R path
+  { src:"Re", dst:"Mo" },
+  // E path
+  { src:"Re", dst:"Ev" },
+  // U path
+  { src:"Re", dst:"Pr" },
+  // D path
+  { src:"Pr", dst:"Re" }, { src:"Pr", dst:"Mo" }, { src:"Pr", dst:"Me" },
 ];
 
-// ─────────────────────────────────────────────
-// D3 setup
-// ─────────────────────────────────────────────
+// Path letter → color
+const PATH_COLORS = {
+  P: "#58a6ff", R: "#e3b341", E: "#ff7b72",
+  U: "#d2a8ff", D: "#3fb950", S: "#8b949e",
+};
+
+// ── D3 setup ──
 const svg = d3.select("#graph-svg");
-const W   = () => document.getElementById("graph-panel").clientWidth;
-const H   = () => document.getElementById("graph-panel").clientHeight;
+let W = 700, H = 450;
 
-// Markers
+function resize() {
+  const panel = document.getElementById("graph-panel");
+  W = panel.clientWidth; H = panel.clientHeight;
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  // Reposition nodes proportionally
+  FAMILIES.forEach(f => {
+    const baseX = f.x / 700, baseY = f.y / 450;
+    f.cx = baseX * W; f.cy = baseY * H;
+  });
+}
+resize();
+window.addEventListener("resize", () => { resize(); renderGraph(); });
+
 const defs = svg.append("defs");
-defs.append("marker")
-  .attr("id","arrow-gray").attr("markerWidth",8).attr("markerHeight",8)
-  .attr("refX",6).attr("refY",3).attr("orient","auto")
+defs.append("marker").attr("id","arrow-gray")
+  .attr("markerWidth",8).attr("markerHeight",8)
+  .attr("refX",22).attr("refY",3).attr("orient","auto")
   .append("path").attr("d","M0,0 L0,6 L8,3 z").attr("fill","#30363d");
 
-defs.append("marker")
-  .attr("id","arrow-active").attr("markerWidth",8).attr("markerHeight",8)
-  .attr("refX",6).attr("refY",3).attr("orient","auto")
-  .append("path").attr("d","M0,0 L0,6 L8,3 z").attr("fill","#e6edf3");
+defs.append("marker").attr("id","arrow-active")
+  .attr("markerWidth",8).attr("markerHeight",8)
+  .attr("refX",22).attr("refY",3).attr("orient","auto")
+  .append("path").attr("d","M0,0 L0,6 L8,3 z").attr("fill","#58a6ff");
 
-const R = 40; // node radius
+const g = svg.append("g");
 
-// ── Compute edge path ──────────────────────────────────────────────────────
-function edgePath(src, dst, shorten) {
-  shorten = shorten || (R + 8);
-  const s = MODULE_MAP[src], d = MODULE_MAP[dst];
-  if (!s || !d) return "";
-  if (src === dst) {
-    const cx = s.x + 60, cy = s.y - 60;
-    return "M"+(s.x + R*0.7)+","+(s.y - R*0.7)+" Q"+cx+","+cy+" "+(s.x + R*0.7 + 1)+","+(s.y - R*0.7 + 1);
-  }
+// Draw static edge backgrounds
+function edgeKey(e) { return `${e.src}-${e.dst}`; }
+function getPos(id) { const f = FAM_MAP[id]; return { x: f.cx, y: f.cy }; }
+
+function lineCoords(src, dst, offset) {
+  const s = getPos(src), d = getPos(dst);
   const dx = d.x - s.x, dy = d.y - s.y;
-  const dist = Math.sqrt(dx*dx + dy*dy);
-  const ux = dx/dist, uy = dy/dist;
-  const x1 = s.x + ux * (R + 4), y1 = s.y + uy * (R + 4);
-  const x2 = d.x - ux * shorten,  y2 = d.y - uy * shorten;
-  // Slight curve offset for visual clarity
-  const mx = (x1+x2)/2 - uy*22, my = (y1+y2)/2 + ux*22;
-  return "M"+x1+","+y1+" Q"+mx+","+my+" "+x2+","+y2;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const R = 26; // node radius
+  const ox = offset ? (dy/len)*4 : 0;
+  const oy = offset ? -(dx/len)*4 : 0;
+  return {
+    x1: s.x + (dx/len)*R + ox, y1: s.y + (dy/len)*R + oy,
+    x2: d.x - (dx/len)*R + ox, y2: d.y - (dy/len)*R + oy,
+  };
 }
 
-function pathLen(pathStr) {
-  const el = document.createElementNS("http://www.w3.org/2000/svg","path");
-  el.setAttribute("d", pathStr);
-  return el.getTotalLength();
-}
+// Check for bidirectional pairs to offset parallel edges
+const edgeSet = new Set(EDGES.map(e => edgeKey(e)));
+function isBidi(e) { return edgeSet.has(`${e.dst}-${e.src}`); }
 
-// ── Background edges ──────────────────────────────────────────────────────
-const edgeGroup  = svg.append("g").attr("class","edges-bg");
-const flashGroup = svg.append("g").attr("class","edges-flash");
-const nodeGroup  = svg.append("g").attr("class","nodes");
+const edgeBgGroup = g.append("g").attr("class","edge-bgs");
+const edgeFlashGroup = g.append("g").attr("class","edge-flashes");
+const nodeGroup = g.append("g").attr("class","nodes");
 
-const bgEdges    = {};
-const flashEdges = {};
-
-// De-duplicate edges
-const edgeSet = new Set();
-KNOWN_EDGES.forEach(([src,dst]) => {
-  const key = src+"-"+dst;
-  if (edgeSet.has(key)) return;
-  edgeSet.add(key);
-
-  const p = edgePath(src, dst);
-  if (!p) return;
-
-  bgEdges[key] = edgeGroup.append("path")
+function renderGraph() {
+  // Static edges
+  edgeBgGroup.selectAll(".edge-bg")
+    .data(EDGES, edgeKey)
+    .join("line")
     .attr("class","edge-bg")
-    .attr("d", p);
+    .each(function(e) {
+      const c = lineCoords(e.src, e.dst, isBidi(e));
+      d3.select(this)
+        .attr("x1",c.x1).attr("y1",c.y1)
+        .attr("x2",c.x2).attr("y2",c.y2);
+    });
 
-  const len = pathLen(p);
-  flashEdges[key] = flashGroup.append("path")
+  // Flash lines (invisible until animated)
+  edgeFlashGroup.selectAll(".edge-flash")
+    .data(EDGES, edgeKey)
+    .join("line")
     .attr("class","edge-flash")
-    .attr("d", p)
-    .attr("stroke", MODULE_MAP[src] ? MODULE_MAP[src].color : "#fff")
-    .attr("stroke-dasharray", len)
-    .attr("stroke-dashoffset", len);
-});
+    .each(function(e) {
+      const c = lineCoords(e.src, e.dst, isBidi(e));
+      d3.select(this)
+        .attr("x1",c.x1).attr("y1",c.y1)
+        .attr("x2",c.x2).attr("y2",c.y2)
+        .attr("data-src", e.src)
+        .attr("data-dst", e.dst);
+    });
 
-// ── Nodes ──────────────────────────────────────────────────────────────────
-const nodeEls    = {};
-const slotEls    = {};
-const badgeEls   = {};
-const stateEls   = {};
-const pulseTimers = {};
+  // Nodes
+  const nodeSel = nodeGroup.selectAll(".node")
+    .data(FAMILIES, d => d.id)
+    .join(enter => {
+      const ng = enter.append("g").attr("class","node");
+      ng.append("circle").attr("class","node-circle").attr("r", 26);
+      ng.append("text").attr("class","node-label").attr("dy","0.05em");
+      ng.append("text").attr("class","node-sub").attr("dy","2.4em");
+      ng.append("text").attr("class","state-badge").attr("dy","-2em");
+      const qb = ng.append("g").attr("class","queue-badge");
+      qb.append("circle").attr("r",8).attr("cx",18).attr("cy",-18);
+      qb.append("text").attr("x",18).attr("y",-18);
+      return ng;
+    });
 
-MODULES.forEach(m => {
-  const g = nodeGroup.append("g")
-    .attr("transform", "translate("+m.x+","+m.y+")");
+  nodeGroup.selectAll(".node").each(function(f) {
+    const ng = d3.select(this);
+    ng.attr("transform", `translate(${f.cx},${f.cy})`);
+    ng.select(".node-circle")
+      .attr("fill", f.color + "22")
+      .attr("stroke", f.color)
+      .style("--node-color", f.color);
+    ng.select(".node-label").text(f.label).attr("fill", f.color);
+    ng.select(".node-sub").text(f.desc);
+    ng.select(".state-badge").text(familyStates[f.id] || "IDLE")
+      .classed("thinking", (familyStates[f.id] || "IDLE") === "THINKING");
 
-  // Outer glow circle
-  const circleEl = g.append("circle")
-    .attr("class","node-circle")
-    .attr("r", R)
-    .attr("fill", m.color + "22")
-    .style("stroke", m.color)
-    .style("stroke-width","2.5");
-
-  // Inner fill
-  g.append("circle")
-    .attr("r", R - 4)
-    .attr("fill", m.color + "18");
-
-  // Label (family prefix)
-  g.append("text")
-    .attr("class","node-label")
-    .attr("y", -3)
-    .style("fill", m.color)
-    .text(m.label);
-
-  // Sub-label (full name)
-  g.append("text")
-    .attr("class","node-sublabel")
-    .attr("y", 12)
-    .text(m.fullName);
-
-  // State text below node
-  const slotEl = g.append("text")
-    .attr("class","slot-text")
-    .attr("y", R + 8)
-    .text("idle");
-  slotEls[m.id] = slotEl;
-
-  // State indicator dot
-  const stateDot = g.append("circle")
-    .attr("class","state-dot")
-    .attr("cx", -(R - 8))
-    .attr("cy", -(R - 8))
-    .attr("r", 4)
-    .attr("fill", "#3fb950");  // green = idle
-  stateEls[m.id] = stateDot;
-
-  // Queue badge
-  const badge = g.append("g")
-    .attr("class","queue-badge")
-    .attr("transform", "translate("+(R - 5)+","+(-R + 5)+")");
-  badge.append("circle").attr("r",9);
-  const badgeText = badge.append("text").text("0");
-  badgeEls[m.id] = { group: badge, text: badgeText };
-
-  // Click → open task stack panel
-  g.style("cursor", "pointer");
-  g.on("click", function(event) {
-    event.stopPropagation();
-    if (taskPanelModule === m.id && taskPanel.classList.contains("open")) {
-      closeTaskPanel();
-    } else {
-      openTaskPanel(m.id);
-    }
-  });
-  nodeEls[m.id] = { g: g, circle: circleEl };
-});
-
-// ── Scale to actual SVG size ──────────────────────────────────────────────
-function rescale() {
-  const w = W(), h = H();
-  const scaleX = w / 900, scaleY = h / 520;
-  const scale  = Math.min(scaleX, scaleY) * 0.92;
-  const offX   = (w - 900 * scale) / 2;
-  const offY   = (h - 520 * scale) / 2;
-  edgeGroup.attr("transform",  "translate("+offX+","+offY+") scale("+scale+")");
-  flashGroup.attr("transform", "translate("+offX+","+offY+") scale("+scale+")");
-  nodeGroup.attr("transform",  "translate("+offX+","+offY+") scale("+scale+")");
-}
-rescale();
-window.addEventListener("resize", rescale);
-
-// ─────────────────────────────────────────────
-// Pinned messages
-// ─────────────────────────────────────────────
-let pinnedMessages = [];
-let pinIdCounter   = 0;
-
-const pinnedSection = document.getElementById("pinned-section");
-const pinnedList    = document.getElementById("pinned-list");
-const pinnedCount   = document.getElementById("pinned-count");
-const clearPinsBtn  = document.getElementById("clear-pins");
-
-function escapeHtml(str) {
-  return (str || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function pinMessage(sender, receiver, body, traceId, messageId, time_, originDiv) {
-  const id    = ++pinIdCounter;
-  const color = FAMILY_COLORS[sender] || "#fff";
-  pinnedMessages.push({ id, sender, receiver, body, traceId, messageId, time_, color, originDiv });
-  renderPinned();
-}
-
-function unpinMessage(id) {
-  const entry = pinnedMessages.find(function(p) { return p.id === id; });
-  if (entry && entry.originDiv) {
-    entry.originDiv.classList.remove("pinned-in-feed");
-    entry.originDiv._pinId = null;
-  }
-  pinnedMessages = pinnedMessages.filter(function(p) { return p.id !== id; });
-  renderPinned();
-}
-
-function renderPinned() {
-  pinnedCount.textContent = pinnedMessages.length;
-  if (pinnedMessages.length === 0) {
-    pinnedSection.classList.remove("has-pins");
-    pinnedList.innerHTML = "";
-    return;
-  }
-  pinnedSection.classList.add("has-pins");
-  pinnedList.innerHTML = "";
-  pinnedMessages.forEach(function(p) {
-    const div = document.createElement("div");
-    div.className = "pinned-entry";
-    div.style.borderLeftColor = p.color;
-    div.innerHTML =
-      '<button class="unpin-btn" title="Unpin">&times;</button>' +
-      '<div class="pinned-entry-header">' +
-        '<span class="pinned-entry-route" style="color:' + p.color + '">[' + escapeHtml(p.sender) + ' &rarr; ' + escapeHtml(p.receiver) + ']</span>' +
-        '<span class="pinned-entry-id">' + escapeHtml(p.messageId) + '</span>' +
-        '<span class="pinned-entry-time">' + escapeHtml(p.time_) + '</span>' +
-      '</div>' +
-      (p.traceId ? '<div style="color:#6e7681;font-size:8px;margin-bottom:2px">trace: ' + escapeHtml(p.traceId) + '</div>' : '') +
-      '<div class="pinned-entry-detail">' + (escapeHtml(p.body) || '<em style="color:#555">&mdash; no body &mdash;</em>') + '</div>';
-    div.querySelector(".unpin-btn").addEventListener("click", function() { unpinMessage(p.id); });
-    pinnedList.appendChild(div);
+    const depth = queueDepths[f.id] || 0;
+    const qb = ng.select(".queue-badge");
+    qb.classed("visible", depth > 0);
+    qb.select("text").text(depth);
   });
 }
 
-clearPinsBtn.addEventListener("click", function() {
-  pinnedMessages.forEach(function(p) {
-    if (p.originDiv) p.originDiv.classList.remove("pinned-in-feed");
-  });
-  pinnedMessages = [];
-  renderPinned();
-});
+// ── State ──
+let familyStates = { Re:"IDLE", Pr:"IDLE", Ev:"IDLE", Me:"IDLE", Mo:"IDLE" };
+let queueDepths  = { Re:0, Pr:0, Ev:0, Me:0, Mo:0 };
+let msgCount = 0;
 
-// ─────────────────────────────────────────────
-// Prediction task progress strip
-// ─────────────────────────────────────────────
-function renderPlanProgress(prTasks) {
-  const bars = document.getElementById("plan-progress-bars");
-  bars.innerHTML = "";
-  if (!prTasks || prTasks.length === 0) {
-    const ph = document.createElement("div");
-    ph.className = "progress-bar-empty";
-    ph.textContent = "No pending tasks";
-    bars.appendChild(ph);
-    return;
-  }
-  prTasks.forEach(function(task, idx) {
-    var bodyStr = task.body || "";
-    var contextStr = task.context || "";
-    var fullLabel = "[" + (task.sender || "?") + "] " + (contextStr ? contextStr + " | " : "") + bodyStr.substring(0, 60);
-    var row = document.createElement("div");
-    row.className = "progress-bar-row";
-    row.innerHTML =
-      '<div class="progress-bar-label" title="' + escapeHtml(bodyStr) + '">' + escapeHtml(fullLabel) + '</div>' +
-      '<div class="progress-bar-track"><div class="progress-bar-fill" style="width:0%"></div></div>' +
-      '<div class="progress-bar-pct">queued</div>';
-    bars.appendChild(row);
-  });
+// ── Flash edge ──
+function flashEdge(src, dst, pathLetter) {
+  const color = PATH_COLORS[pathLetter] || "#58a6ff";
+  // Inject/update arrow marker color
+  defs.select("#arrow-active path").attr("fill", color);
+  edgeFlashGroup.selectAll(".edge-flash")
+    .filter(function() {
+      return this.getAttribute("data-src") === src &&
+             this.getAttribute("data-dst") === dst;
+    })
+    .each(function() {
+      const el = d3.select(this);
+      el.attr("stroke", color)
+        .classed("active", false);
+      void this.offsetWidth; // reflow
+      el.classed("active", true);
+    });
+
+  // Pulse node
+  nodeGroup.selectAll(".node")
+    .filter(d => d.id === src || d.id === dst)
+    .select(".node-circle")
+    .classed("pulse", true);
+  setTimeout(() => {
+    nodeGroup.selectAll(".node-circle").classed("pulse", false);
+  }, 600);
 }
 
-// ─────────────────────────────────────────────
-// Message feed
-// ─────────────────────────────────────────────
+// ── Message feed ──
 const feedEl = document.getElementById("msg-feed");
-
-// ─────────────────────────────────────────────
-// Task stack panel
-// ─────────────────────────────────────────────
-let lastTaskStacks  = {};
-let taskPanelModule = null;
-
-const taskPanel      = document.getElementById("task-panel");
-const taskPanelTitle = document.getElementById("task-panel-title");
-const taskPanelCount = document.getElementById("task-panel-count");
-const taskPanelList  = document.getElementById("task-panel-list");
-const taskPanelClose = document.getElementById("task-panel-close");
-
-function renderTaskPanel() {
-  if (!taskPanelModule) return;
-  const tasks = lastTaskStacks[taskPanelModule] || [];
-  const color = FAMILY_COLORS[taskPanelModule] || "#fff";
-  const name  = FAMILY_NAMES[taskPanelModule] || taskPanelModule;
-  taskPanelTitle.textContent = name + " (" + taskPanelModule + ")";
-  taskPanelTitle.style.color = color;
-  taskPanelCount.textContent = tasks.length === 0 ? "empty" : tasks.length + " task" + (tasks.length > 1 ? "s" : "");
-  taskPanelList.innerHTML = "";
-  if (tasks.length === 0) {
-    var empty = document.createElement("div");
-    empty.className = "task-empty";
-    empty.textContent = "No pending tasks";
-    taskPanelList.appendChild(empty);
-    return;
+function addFeedEntry(ev) {
+  if (feedEl.children.length >= MAX_FEED) {
+    feedEl.removeChild(feedEl.firstChild);
   }
-  tasks.forEach(function(t) {
-    var row = document.createElement("div");
-    row.className = "task-row";
-    row.innerHTML =
-      '<div class="task-body">' +
-        '<div><span class="task-sender">[' + escapeHtml(t.sender) + ']</span> ' +
-        '<span class="task-id">' + escapeHtml(t.message_id) + '</span></div>' +
-        (t.trace_id ? '<div style="color:#6e7681;font-size:8px">trace: ' + escapeHtml(t.trace_id) + '</div>' : '') +
-        '<div class="task-detail" title="' + escapeHtml(t.body) + '">' + (escapeHtml(t.body) || '&mdash;') + '</div>' +
-      '</div>';
-    taskPanelList.appendChild(row);
-  });
-}
-
-function openTaskPanel(moduleId) {
-  taskPanelModule = moduleId;
-  taskPanel.classList.add("open");
-  renderTaskPanel();
-}
-
-function closeTaskPanel() {
-  taskPanel.classList.remove("open");
-  taskPanelModule = null;
-}
-
-taskPanelClose.addEventListener("click", closeTaskPanel);
-
-document.getElementById("graph-svg").addEventListener("click", function(e) {
-  if (e.target === document.getElementById("graph-svg") || e.target.tagName === "svg") {
-    closeTaskPanel();
-  }
-});
-
-let feedEntries = [];
-
-function addFeedEntry(sender, receiver, body, traceId, messageId, ts) {
-  const color = FAMILY_COLORS[sender] || "#fff";
-  const recvColor = FAMILY_COLORS[receiver] || "#ccc";
-  const time_ = new Date(Date.now()).toISOString().substr(11, 12);
-  const traceStr = traceId ? " [" + traceId + "]" : "";
-  const text  = (time_ + " " + sender + " \u2192 " + receiver + traceStr + " | " + body).substring(0, 110);
-  const div   = document.createElement("div");
-  div.className = "feed-entry new";
-  div.style.borderLeftColor = color;
-  div.title = "Click to pin full message";
-
-  // Color the sender and receiver parts
-  div.innerHTML =
-    '<span style="color:#6e7681">' + escapeHtml(time_) + '</span> ' +
-    '<span style="color:' + color + ';font-weight:bold">' + escapeHtml(sender) + '</span>' +
-    '<span style="color:#6e7681"> \u2192 </span>' +
-    '<span style="color:' + recvColor + ';font-weight:bold">' + escapeHtml(receiver) + '</span>' +
-    (traceId ? '<span style="color:#484f58;font-size:9px"> [' + escapeHtml(traceId) + ']</span>' : '') +
-    '<span style="color:#8b949e"> | </span>' +
-    '<span style="color:' + color + 'bb">' + escapeHtml((body || "").substring(0, 70)) + '</span>';
-
-  div._pinId = null;
-  div._data = { sender: sender, receiver: receiver, body: body, traceId: traceId, messageId: messageId, time_: time_ };
-
-  div.addEventListener("click", function() {
-    if (div._pinId !== null) {
-      unpinMessage(div._pinId);
-      div._pinId = null;
-    } else {
-      var d = div._data;
-      pinMessage(d.sender, d.receiver, d.body, d.traceId, d.messageId, d.time_, div);
-      var entry = pinnedMessages[pinnedMessages.length - 1];
-      div._pinId = entry.id;
-      div.classList.add("pinned-in-feed");
-    }
-  });
-
-  feedEntries.push(div);
-  if (feedEntries.length > MAX_FEED) {
-    var old = feedEntries.shift();
-    if (old.parentNode) old.parentNode.removeChild(old);
-  }
+  const pathColor = PATH_COLORS[ev.path] || "#8b949e";
+  const div = document.createElement("div");
+  div.className = "feed-entry new" + (ev.is_ack ? " is-ack" : "");
+  div.style.borderLeftColor = pathColor;
+  const route = `<span style="color:${pathColor}">${ev.src}→${ev.dst}[${ev.path}]</span>`;
+  const summary = ev.summary ? ` <span style="color:#8b949e">${escHtml(ev.summary.slice(0,60))}</span>` : "";
+  div.innerHTML = `${route}${summary}`;
   feedEl.appendChild(div);
   feedEl.scrollTop = feedEl.scrollHeight;
 }
 
-// ─────────────────────────────────────────────
-// Event handling
-// ─────────────────────────────────────────────
-function handleMsg(data) {
-  var sender   = data.sender;
-  var receiver = data.receiver;
-  var key = sender + "-" + receiver;
-
-  // Flash edge
-  var fe = flashEdges[key];
-  if (fe) {
-    var pathEl = fe.node();
-    var len = pathEl.getTotalLength();
-    var srcColor = FAMILY_COLORS[sender] || "#ffffff";
-    fe.attr("stroke", srcColor)
-      .attr("stroke-dasharray", len)
-      .attr("stroke-dashoffset", len)
-      .classed("active", false);
-    void pathEl.getBoundingClientRect();
-    fe.classed("active", true);
-  }
-
-  // Pulse destination node
-  if (nodeEls[receiver]) {
-    var circleEl = nodeEls[receiver].circle;
-    circleEl.classed("pulse", true);
-    clearTimeout(pulseTimers[receiver]);
-    pulseTimers[receiver] = setTimeout(function() { circleEl.classed("pulse", false); }, 600);
-  }
-
-  // Feed
-  addFeedEntry(sender, receiver, data.body || "", data.trace_id || "", data.message_id || "", data.ts);
+// ── Broadcasts ──
+const bcList = document.getElementById("bc-list");
+function updateBroadcasts(broadcasts) {
+  bcList.innerHTML = "";
+  [...broadcasts].reverse().slice(0, 8).forEach(b => {
+    const div = document.createElement("div");
+    div.className = "bc-entry";
+    div.innerHTML = `<span class="bc-sender">[${escHtml(b.sender)}]</span> ${escHtml(b.summary)}`;
+    bcList.appendChild(div);
+  });
 }
 
-function handleSnapshot(data) {
-  // Update family states
-  var states = data.family_states || {};
-  Object.keys(states).forEach(function(mid) {
-    if (slotEls[mid]) {
-      slotEls[mid].text(states[mid] || "idle");
-    }
-    if (stateEls[mid]) {
-      var st = states[mid] || "idle";
-      var dotColor = st === "idle" ? "#3fb950" : st === "thinking" ? "#d29922" : "#58a6ff";
-      stateEls[mid].attr("fill", dotColor);
-    }
-  });
-
-  // Update queue depth badges
-  var depths = data.queue_depths || {};
-  Object.keys(depths).forEach(function(mid) {
-    var badge = badgeEls[mid];
-    if (badge) {
-      var count = depths[mid];
-      badge.text.text(count);
-      if (count > 0) badge.group.classed("visible", true);
-      else           badge.group.classed("visible", false);
-    }
-  });
-
-  // Update task stacks data
-  if (data.task_stacks) {
-    lastTaskStacks = data.task_stacks;
-    if (taskPanelModule) renderTaskPanel();
-    renderPlanProgress(lastTaskStacks["Pr"] || []);
-  }
-
-  // Update stats bar
-  var stats = data.stats || {};
-  document.getElementById("stat-calls").textContent   = stats.llm_calls || 0;
-  document.getElementById("stat-tokens").textContent  = stats.tokens || 0;
-  document.getElementById("stat-uptime").textContent  = (stats.uptime || 0) + "s";
-  document.getElementById("stat-clients").textContent = stats.clients || 0;
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// ─────────────────────────────────────────────
-// WebSocket with auto-reconnect
-// ─────────────────────────────────────────────
-const connDot    = document.getElementById("conn-dot");
-const connLabel  = document.getElementById("conn-label");
-let   wsRetryTimer = null;
+// ── WebSocket ──
+let ws, reconnectTimer;
 
 function connect() {
-  const ws = new WebSocket(WS_URL);
+  ws = new WebSocket(WS_URL);
 
-  ws.onopen = function() {
-    connDot.className = "ok";
-    connLabel.textContent = "Connected";
+  ws.onopen = () => {
+    document.getElementById("conn-dot").classList.add("ok");
+    document.getElementById("conn-label").textContent = "Connected";
+    renderGraph();
   };
 
-  ws.onmessage = function(ev) {
-    var data;
-    try { data = JSON.parse(ev.data); } catch(e) { return; }
-    if (data.type === "msg")      handleMsg(data);
-    if (data.type === "snapshot") handleSnapshot(data);
-    if (data.type === "ping")     return;
+  ws.onclose = () => {
+    document.getElementById("conn-dot").classList.remove("ok");
+    document.getElementById("conn-label").textContent = "Reconnecting...";
+    reconnectTimer = setTimeout(connect, 2000);
   };
 
-  ws.onclose = ws.onerror = function() {
-    connDot.className = "";
-    connLabel.textContent = "Disconnected \u2014 retrying\u2026";
-    clearTimeout(wsRetryTimer);
-    wsRetryTimer = setTimeout(connect, 2000);
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = e => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+
+    if (ev.type === "ping") return;
+
+    if (ev.type === "msg") {
+      msgCount++;
+      document.getElementById("stat-msgs").textContent = msgCount;
+      addFeedEntry(ev);
+      if (!ev.is_ack && FAM_MAP[ev.src] && FAM_MAP[ev.dst]) {
+        flashEdge(ev.src, ev.dst, ev.path);
+      }
+    }
+
+    if (ev.type === "snapshot") {
+      if (ev.states)       familyStates = ev.states;
+      if (ev.queue_depths) queueDepths  = ev.queue_depths;
+      if (ev.broadcasts)   updateBroadcasts(ev.broadcasts);
+      if (ev.uptime != null) {
+        document.getElementById("stat-uptime").textContent = ev.uptime + "s";
+      }
+      renderGraph();
+    }
   };
 }
 
+// ── Tab switching ──
+const DEBUG_API = 'http://localhost:7901';
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'models-tab') {
+      refreshModels();
+      refreshFamilyModels();
+    }
+    if (btn.dataset.tab === 'graph-tab') {
+      resize(); renderGraph();
+    }
+  });
+});
+
+// ── Models tab ──
+const FAMILY_COLORS = {};
+FAMILIES.forEach(f => FAMILY_COLORS[f.id] = f.color);
+
+let availableModels = [];
+
+function renderModelCards(familyConfigs) {
+  const container = document.getElementById('model-cards');
+  container.innerHTML = '';
+  const order = ['Re', 'Pr', 'Ev', 'Me', 'Mo'];
+  const descs = { Re: 'Reaction', Pr: 'Prediction', Ev: 'Evaluation', Me: 'Memorization', Mo: 'Motion' };
+
+  order.forEach(prefix => {
+    const cfg = familyConfigs[prefix] || { model: 'unknown', temperature: 0.7, max_tokens: 4096 };
+    const color = FAMILY_COLORS[prefix] || '#8b949e';
+    const card = document.createElement('div');
+    card.className = 'model-card';
+    card.style.borderLeftColor = color;
+
+    const options = availableModels.map(m =>
+      `<option value="${escHtml(m.name)}" ${m.name === cfg.model ? 'selected' : ''}>${escHtml(m.raw_name)}</option>`
+    ).join('');
+
+    // If current model not in list, add it as an option
+    const currentInList = availableModels.some(m => m.name === cfg.model);
+    const extraOpt = currentInList ? '' :
+      `<option value="${escHtml(cfg.model)}" selected>${escHtml(cfg.model)} (current)</option>`;
+
+    card.innerHTML = `
+      <h3><span class="dot" style="background:${color}"></span>${prefix} — ${descs[prefix]}</h3>
+      <div>
+        <label>Model</label>
+        <select id="sel-${prefix}">${extraOpt}${options}</select>
+      </div>
+      <div class="card-row">
+        <div>
+          <label>Temperature</label>
+          <input type="number" id="temp-${prefix}" value="${cfg.temperature}" min="0" max="2" step="0.1">
+        </div>
+        <div>
+          <label>Max Tokens</label>
+          <input type="number" id="maxtok-${prefix}" value="${cfg.max_tokens}" disabled style="opacity:0.5" title="Read-only">
+        </div>
+      </div>
+      <button class="apply-btn" onclick="applyModel('${prefix}')">Apply</button>
+      <div class="status-msg" id="status-${prefix}"></div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+async function refreshModels() {
+  const errEl = document.getElementById('ollama-error');
+  errEl.style.display = 'none';
+  try {
+    const resp = await fetch(`${DEBUG_API}/models`);
+    const data = await resp.json();
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+    }
+    availableModels = data.models || [];
+  } catch (e) {
+    errEl.textContent = `Cannot reach debug API: ${e.message}`;
+    errEl.style.display = 'block';
+    availableModels = [];
+  }
+}
+
+async function refreshFamilyModels() {
+  try {
+    const resp = await fetch(`${DEBUG_API}/families/models`);
+    const data = await resp.json();
+    renderModelCards(data.families || {});
+  } catch (e) {
+    document.getElementById('model-cards').innerHTML =
+      `<p style="color:#da3633">Cannot reach debug API: ${e.message}</p>`;
+  }
+}
+
+async function applyModel(prefix) {
+  const statusEl = document.getElementById(`status-${prefix}`);
+  const model = document.getElementById(`sel-${prefix}`).value;
+  const temperature = parseFloat(document.getElementById(`temp-${prefix}`).value);
+  statusEl.textContent = 'Applying...';
+  statusEl.className = 'status-msg';
+
+  const payload = { model };
+  if (!isNaN(temperature)) payload.temperature = temperature;
+
+  try {
+    const resp = await fetch(`${DEBUG_API}/family/${prefix}/model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      statusEl.textContent = `Applied: ${data.model} (temp=${data.temperature})`;
+      statusEl.className = 'status-msg ok';
+    } else {
+      statusEl.textContent = `Error: ${data.detail || JSON.stringify(data)}`;
+      statusEl.className = 'status-msg err';
+    }
+  } catch (e) {
+    statusEl.textContent = `Failed: ${e.message}`;
+    statusEl.className = 'status-msg err';
+  }
+}
+
+// ── Init ──
+renderGraph();
 connect();
 </script>
 </body>
