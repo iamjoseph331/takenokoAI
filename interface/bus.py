@@ -79,6 +79,14 @@ DEFAULT_QUEUE_MAXSIZE = 5
 DEFAULT_BROADCAST_BUFFER_SIZE = 20
 
 
+class QueueFullPolicy(StrEnum):
+    """Policy for submodules when the receiver's queue is full."""
+
+    WAIT = "WAIT"    # Exponential backoff retry until space opens
+    RETRY = "RETRY"  # Retry up to max_retries times, then drop
+    DROP = "DROP"     # Drop the message immediately
+
+
 @dataclass(frozen=True)
 class QueueFullSignal:
     """Returned by MessageBus.send() when the receiver's queue is full."""
@@ -150,6 +158,8 @@ class MessageBus:
         self.pause_event: asyncio.Event = asyncio.Event()
         self.pause_event.set()  # start running (not paused)
         self._broadcasts: deque[Broadcast] = deque(maxlen=broadcast_buffer_size)
+        # Shared per-family message counters (used by both MainModule and SubModule)
+        self._family_counters: dict[str, int] = {}
         # Optional hook called synchronously in send() for visualization
         self.viz_hook: Callable[[BusMessage], None] | None = None
 
@@ -271,6 +281,18 @@ class MessageBus:
         raise ValueError(
             f"Receiver {receiver_name!r} is not registered on the bus"
         )
+
+    def next_message_id(
+        self, family_prefix: FamilyPrefix, path: CognitionPath
+    ) -> str:
+        """Generate the next sequential message ID for a family.
+
+        Uses a shared per-family counter so both MainModule and SubModule
+        produce unique, monotonically increasing IDs within the same family.
+        """
+        key = family_prefix.value
+        self._family_counters[key] = self._family_counters.get(key, 0) + 1
+        return self.make_message_id(family_prefix, self._family_counters[key], path)
 
     @staticmethod
     def make_message_id(

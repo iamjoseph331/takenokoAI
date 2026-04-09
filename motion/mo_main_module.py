@@ -80,6 +80,15 @@ class MotionModule(MainModule):
         """Handle action directives from Re, Ev, and Pr."""
         body = message.body or {}
 
+        # Route capability invocations to submodules
+        if isinstance(body, dict) and "capability" in body:
+            cap_name = body["capability"]
+            target_qn = self.find_capability(cap_name)
+            if target_qn:
+                await self._bus.send(message.model_copy(update={}))
+                self._logger.action(f"Routed capability '{cap_name}' to {target_qn}")
+                return
+
         if isinstance(body, dict):
             # Check for explicit action
             action = body.get("action")

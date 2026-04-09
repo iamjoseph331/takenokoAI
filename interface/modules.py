@@ -18,6 +18,7 @@ from interface.bus import (
     CognitionPath,
     FamilyPrefix,
     MessageBus,
+    QueueFullPolicy,
     QueueFullSignal,
 )
 from interface.llm import CompletionFn, LLMClient, LLMConfig
@@ -89,8 +90,9 @@ class BaseModule(ABC):
         parent_message_id: str | None = None,
         trace_id: str = "",
         resources: dict[str, Any] | None = None,
+        summary: str = "",
     ) -> str:
-        raise NotImplementedError("send_message requires MainModule context")
+        raise NotImplementedError("send_message requires MainModule or SubModule")
 
     async def think(
         self,
@@ -133,10 +135,10 @@ class MainModule(BaseModule):
             prompt_assembler=prompt_assembler,
             completion_fn=completion_fn,
         )
-        self._message_counter: int = 0
         self._state: ModuleState | str = ModuleState.IDLE
         self._custom_states: set[str] = set()
         self._submodules: dict[str, SubModule] = {}
+        self._submodule_registry: dict[str, dict[str, Any]] = {}
         self._task_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._running: bool = False
         self._pause_event: asyncio.Event = asyncio.Event()
@@ -160,11 +162,12 @@ class MainModule(BaseModule):
     # ── Message ID generation ──
 
     def next_message_id(self, path: CognitionPath) -> str:
-        """Generate the next sequential message ID for this family."""
-        self._message_counter += 1
-        return MessageBus.make_message_id(
-            self.family_prefix, self._message_counter, path
-        )
+        """Generate the next sequential message ID for this family.
+
+        Delegates to the bus's shared per-family counter so that
+        MainModule and SubModule IDs never collide.
+        """
+        return self._bus.next_message_id(self.family_prefix, path)
 
     @staticmethod
     def _generate_trace_id() -> str:
@@ -245,9 +248,26 @@ class MainModule(BaseModule):
     # ── Sub-module management (申告制) ──
 
     def register_submodule(self, sub: SubModule) -> None:
+        """Register a submodule by direct reference (legacy path).
+
+        Prefer bus-based registration via SubModule.start() for new code.
+        Scheduled for removal in Stage 2.
+        """
         self._submodules[sub.name] = sub
         self._logger.action(
             f"Sub-module registered: {sub.name} — {sub.description}"
+        )
+
+    def _handle_sub_registration(self, body: dict[str, Any]) -> None:
+        """Process a bus-based submodule registration message."""
+        name = body["name"]
+        self._submodule_registry[name] = {
+            "qualified_name": body["qualified_name"],
+            "description": body["description"],
+            "capabilities": body.get("capabilities", []),
+        }
+        self._logger.action(
+            f"Sub-module registered via bus: {name} — {body.get('description', '')}"
         )
 
     def unregister_submodule(self, name: str) -> None:
@@ -255,9 +275,58 @@ class MainModule(BaseModule):
             self._bus.unregister(self._submodules[name].qualified_name)
             del self._submodules[name]
             self._logger.action(f"Sub-module unregistered: {name}")
+        if name in self._submodule_registry:
+            qn = self._submodule_registry[name].get("qualified_name", "")
+            if qn:
+                self._bus.unregister(qn)
+            del self._submodule_registry[name]
+            self._logger.action(f"Sub-module unregistered (bus): {name}")
 
-    def list_submodules(self) -> dict[str, dict[str, str]]:
-        return {name: sub.announce() for name, sub in self._submodules.items()}
+    def list_submodules(self) -> dict[str, dict[str, Any]]:
+        """Return capability descriptors for all registered sub-modules."""
+        result: dict[str, dict[str, Any]] = {}
+        for name, sub in self._submodules.items():
+            result[name] = sub.announce()
+        for name, info in self._submodule_registry.items():
+            if name not in result:
+                result[name] = info
+        return result
+
+    def find_capability(self, capability_name: str) -> str | None:
+        """Find the submodule that provides a given capability.
+
+        Returns the submodule's qualified_name, or None if not found.
+        Checks both direct-reference and bus-registered submodules.
+        """
+        for sub in self._submodules.values():
+            if hasattr(sub, "capabilities"):
+                for cap in sub.capabilities():
+                    if cap.name == capability_name:
+                        return sub.qualified_name
+        for info in self._submodule_registry.values():
+            for cap in info.get("capabilities", []):
+                cap_name = cap.get("name") if isinstance(cap, dict) else cap.name
+                if cap_name == capability_name:
+                    return info["qualified_name"]
+        return None
+
+    def list_capabilities(self) -> list[dict[str, Any]]:
+        """Return a flat list of all capabilities across all submodules."""
+        caps: list[dict[str, Any]] = []
+        for sub in self._submodules.values():
+            if hasattr(sub, "capabilities"):
+                for cap in sub.capabilities():
+                    entry = cap.to_dict()
+                    entry["submodule"] = sub.name
+                    entry["qualified_name"] = sub.qualified_name
+                    caps.append(entry)
+        for name, info in self._submodule_registry.items():
+            for cap in info.get("capabilities", []):
+                entry = dict(cap) if isinstance(cap, dict) else cap.to_dict()
+                entry["submodule"] = name
+                entry["qualified_name"] = info["qualified_name"]
+                caps.append(entry)
+        return caps
 
     # ── State management ──
 
@@ -411,6 +480,15 @@ class MainModule(BaseModule):
             self._idle_streak = 0
 
             await self.send_ack(message)
+
+            # Intercept bus-based submodule registration
+            if (
+                isinstance(message.body, dict)
+                and message.body.get("_sub_register")
+            ):
+                self._handle_sub_registration(message.body)
+                continue
+
             await self.set_state(ModuleState.THINKING)
             try:
                 await self._handle_message(message)
@@ -495,42 +573,222 @@ class MainModule(BaseModule):
 class SubModule(BaseModule):
     """Base class for family sub-modules.
 
-    Sub-modules attach to a parent MainModule and announce their
-    capabilities via the self-registration protocol (申告制).
+    Sub-modules are decoupled from MainModule and depend only on interfaces
+    (bus, logger, permissions, llm). They communicate with their parent
+    main module and other families exclusively through the message bus.
+
+    Registration follows the 申告制 (self-registration protocol): on start(),
+    the submodule sends a registration message to its parent's bus queue.
+
+    Each submodule declares capabilities via the capabilities() method.
+    Other modules discover and invoke these through a standardized interface.
+
+    To add a capability named "foo":
+      1. Include Capability(name="foo", ...) in capabilities()
+      2. Implement async def _invoke_foo(self, params: dict) -> dict
     """
 
     def __init__(
         self,
-        parent: MainModule,
+        family_prefix: FamilyPrefix,
         name: str,
         description: str,
+        bus: MessageBus,
+        logger: ModuleLogger,
         llm_config: LLMConfig,
+        permissions: PermissionManager,
+        policy: QueueFullPolicy = QueueFullPolicy.WAIT,
+        max_retries: int = 3,
+        prompt_assembler: PromptAssembler | None = None,
+        completion_fn: CompletionFn | None = None,
     ) -> None:
         super().__init__(
-            family_prefix=parent.family_prefix,
+            family_prefix=family_prefix,
             name=name,
-            bus=parent._bus,
-            logger=ModuleLogger(parent.family_prefix.value, name),
+            bus=bus,
+            logger=logger,
             llm_config=llm_config,
-            permissions=parent._permissions,
+            permissions=permissions,
+            prompt_assembler=prompt_assembler,
+            completion_fn=completion_fn,
         )
-        self._parent = parent
         self.description = description
-        parent.register_submodule(self)
+        self._policy = policy
+        self._max_retries = max_retries
 
-    def announce(self) -> dict[str, str]:
+    # ── Capability system ──
+
+    @abstractmethod
+    def capabilities(self) -> list:
+        """Declare the capabilities this submodule provides.
+
+        Returns a list of Capability objects. Each capability maps
+        to an _invoke_{name} method on this submodule.
+        """
+        raise NotImplementedError("Subclasses must declare capabilities()")
+
+    async def invoke(
+        self, capability_name: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Invoke a capability by name.
+
+        Dispatches to _invoke_{capability_name}(params). Returns a result
+        dict with at least {"status": "ok"|"error"}.
+        """
+        handler = getattr(self, f"_invoke_{capability_name}", None)
+        if handler is None:
+            return {
+                "status": "error",
+                "reason": f"Unknown capability: {capability_name}",
+            }
+        try:
+            return await handler(params or {})
+        except Exception as e:
+            self._logger.action(
+                f"Capability {capability_name} failed: {type(e).__name__}: {e}"
+            )
+            return {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+
+    def announce(self) -> dict[str, Any]:
+        """Return a capability descriptor for self.md registration."""
         return {
             "name": self.name,
             "family": self.family_prefix.value,
             "description": self.description,
             "qualified_name": self.qualified_name,
+            "capabilities": [c.to_dict() for c in self.capabilities()],
         }
 
-    @abstractmethod
-    async def handle_message(self, message: BusMessage) -> Optional[BusMessage]:
-        raise NotImplementedError("Subclasses must implement handle_message()")
+    # ── Message sending with QueueFullPolicy ──
+
+    async def send_message(
+        self,
+        receiver: FamilyPrefix,
+        body: Any,
+        path: CognitionPath,
+        *,
+        context: str = "",
+        parent_message_id: str | None = None,
+        trace_id: str = "",
+        resources: dict[str, Any] | None = None,
+        summary: str = "",
+    ) -> str:
+        """Build, validate, and send a message on the bus.
+
+        Uses the bus's shared per-family counter for message ID generation.
+        Applies QueueFullPolicy when the receiver's queue is full.
+        """
+        msg_id = self._bus.next_message_id(self.family_prefix, path)
+
+        if not trace_id:
+            trace_id = uuid.uuid4().hex[:12]
+
+        if not MessageBus.validate_route(self.family_prefix, receiver, path):
+            self._logger.action(
+                f"WARNING: Route {self.family_prefix}->{receiver} not standard "
+                f"for path {path}, sending anyway (advisory)"
+            )
+
+        message = BusMessage(
+            message_id=msg_id,
+            parent_message_id=parent_message_id,
+            trace_id=trace_id,
+            timecode=MessageBus.now(),
+            context=context,
+            body=body,
+            sender=self.family_prefix,
+            receiver=receiver,
+            resources=resources,
+            summary=summary,
+        )
+        result = await self._bus.send(message)
+
+        if isinstance(result, QueueFullSignal):
+            return await self._apply_policy(message)
+
+        return msg_id
+
+    async def _apply_policy(self, message: BusMessage) -> str:
+        """Handle a full queue according to the configured policy."""
+        if self._policy == QueueFullPolicy.DROP:
+            self._logger.action(
+                f"DROPPED (policy=DROP): {message.message_id} -> {message.receiver}"
+            )
+            return f"DROPPED:{message.message_id}"
+
+        elif self._policy == QueueFullPolicy.RETRY:
+            for attempt in range(self._max_retries):
+                await asyncio.sleep(0.1 * (2 ** attempt))
+                result = await self._bus.send(message)
+                if not isinstance(result, QueueFullSignal):
+                    return message.message_id
+            self._logger.action(
+                f"DROPPED (policy=RETRY, {self._max_retries} attempts): "
+                f"{message.message_id} -> {message.receiver}"
+            )
+            return f"DROPPED:{message.message_id}"
+
+        else:  # WAIT
+            attempt = 0
+            while True:
+                await asyncio.sleep(0.1 * (2 ** min(attempt, 5)))
+                result = await self._bus.send(message)
+                if not isinstance(result, QueueFullSignal):
+                    return message.message_id
+                attempt += 1
+
+    # ── Message handling ──
+
+    async def handle_message(self, message: BusMessage) -> Optional[dict[str, Any]]:
+        """Process an incoming message.
+
+        Default implementation routes capability invocations:
+          {"capability": "name", "params": {...}} -> invoke(name, params)
+
+        Also supports legacy action format:
+          {"action": "name", ...} -> invoke(name, remaining_body)
+
+        Subclasses can override for custom message handling.
+        """
+        body = message.body if isinstance(message.body, dict) else {}
+
+        if "capability" in body:
+            result = await self.invoke(body["capability"], body.get("params", {}))
+            return result
+
+        if "action" in body:
+            action = body["action"]
+            params = {k: v for k, v in body.items() if k != "action"}
+            result = await self.invoke(action, params)
+            return result
+
+        return None
+
+    # ── Registration ──
+
+    async def _register_via_bus(self) -> str:
+        """Send a registration message to the parent main module via the bus.
+
+        This is the bus-based 申告制 (self-registration protocol).
+        """
+        return await self.send_message(
+            receiver=self.family_prefix,
+            body={
+                "_sub_register": True,
+                "name": self.name,
+                "description": self.description,
+                "qualified_name": self.qualified_name,
+                "capabilities": [c.to_dict() for c in self.capabilities()],
+            },
+            path=CognitionPath.S,
+            context=f"Sub-module {self.name} registering",
+        )
+
+    # ── Lifecycle ──
 
     async def start(self) -> None:
+        """Start the submodule and register with the parent via bus."""
+        await self._register_via_bus()
         self._logger.action(f"Sub-module {self.qualified_name} started")
 
     async def stop(self) -> None:

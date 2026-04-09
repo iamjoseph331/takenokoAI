@@ -50,6 +50,31 @@ resources:
     Me: 5
     Mo: 5
 
+# Submodules: decoupled from main modules, depend only on interfaces.
+# Set enabled: true to activate. Policy: WAIT | RETRY | DROP.
+submodules:
+  Re:
+    browser:
+      enabled: false
+      policy: WAIT
+    audio:
+      enabled: false
+      policy: RETRY
+      max_retries: 3
+      stt: {}
+  Mo:
+    browser:
+      enabled: false
+      policy: WAIT
+    audio:
+      enabled: false
+      policy: DROP
+      tts: {}
+  Me:
+    rules:
+      enabled: false
+      policy: WAIT
+
 api_key_envs:
   openai: TAKENOKO_OPENAI_KEY
   anthropic: TAKENOKO_ANTHROPIC_KEY

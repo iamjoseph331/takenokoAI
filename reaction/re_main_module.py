@@ -104,6 +104,16 @@ class ReactionModule(MainModule):
     async def _handle_message(self, message: BusMessage) -> None:
         """Handle incoming messages (D-path directives from Pr)."""
         body = message.body or {}
+
+        # Route capability invocations to submodules
+        if isinstance(body, dict) and "capability" in body:
+            cap_name = body["capability"]
+            target_qn = self.find_capability(cap_name)
+            if target_qn:
+                await self._bus.send(message.model_copy(update={}))
+                self._logger.action(f"Routed capability '{cap_name}' to {target_qn}")
+                return
+
         if isinstance(body, dict) and "text" in body:
             await self.perceive(body)
         elif isinstance(body, dict) and body.get("action") == "re-observe":

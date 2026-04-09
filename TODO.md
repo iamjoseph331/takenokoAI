@@ -25,7 +25,16 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [x] Character definitions (`character.md`) for all five families
 - [x] Pr rulebook (`prediction/pr_rulebook.md`)
 - [x] Trace ID propagation on bus messages
-- [x] Message counter per family for ID generation
+- [x] Message counter per family for ID generation (moved to shared bus counter)
+- [x] `QueueFullPolicy` enum (WAIT/RETRY/DROP) for submodule backpressure
+- [x] `Capability` dataclass and capability system for submodules
+- [x] Decoupled `SubModule` from `MainModule` (depends only on interfaces)
+- [x] Bus-based submodule registration (申告制 via message bus)
+- [x] Submodules moved to `submodules/<Family>/` directory
+- [x] Browser submodules: `Re.browser` (perception), `Mo.browser` (action)
+- [x] Audio submodules: `Re.audio` (STT), `Mo.audio` (TTS)
+- [x] Rules submodule: `Me.rules` (game rule memory)
+- [x] Config-driven submodule boot in `main.py`
 - [x] Markdown section parser (`markdown_utils.py`)
 - [x] API key environment variable mapping for litellm
 - [x] `conftest.py` with `mock_bus`, `mock_logger`, `mock_llm_config`, `mock_permissions` fixtures
@@ -94,7 +103,7 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ### Done — Testing
 
-- [x] 51 tests passing (family behavior, MessageCodec, broadcasts, S-path, idle detection, fallback routes, family states)
+- [x] 74 tests passing (family behavior, MessageCodec, broadcasts, S-path, idle detection, fallback routes, family states, submodule base, capabilities, policies, registration)
 - [x] Injectable completion_fn enables all tests without LLM API
 
 ### To Do — Context & Conversation
@@ -148,12 +157,47 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ---
 
+## Known Issues
+
+- `QueueFullPolicy.WAIT` has no upper-bound timeout — a submodule could block indefinitely if its parent's queue never drains
+- Submodule bus-registration is one-way — no deregistration message yet (only direct `unregister_submodule()` works)
+- Message counter moved from MainModule to MessageBus — counter is no longer persistent across restarts (was already non-persistent, but the migration path changed)
+- `register_submodule()` on MainModule kept for backward compatibility — remove in Stage 2
+- Capability routing in Re/Mo `_handle_message()` forwards the original message to the bus rather than directly to the submodule queue — this means the submodule must be listening on its own bus queue to receive it
+- Browser and audio submodule tests are not yet reimplemented for the new decoupled API (only `test_submodule_base.py` covers the new patterns)
+
+---
+
+## Diary
+
+### 2026-04-07 — Submodule separation (feature/submodule-separation)
+
+**What changed:**
+- Decoupled `SubModule` from `MainModule`: constructor no longer takes `parent: MainModule`, instead takes explicit interface deps (bus, logger, permissions, llm_config)
+- Added `QueueFullPolicy` enum (WAIT/RETRY/DROP) to `interface/bus.py` — submodules use this when sending messages to a full queue
+- Moved message counter from `MainModule._message_counter` to `MessageBus._family_counters` — shared counter prevents ID collisions between MainModule and SubModule
+- Added `interface/capabilities.py` with `Capability` dataclass — standardized pattern for submodule capability declaration
+- SubModule now has `capabilities()` (abstract), `invoke()`, `_apply_policy()`, and `send_message()` — fully autonomous message sending
+- Bus-based registration: `SubModule.start()` sends `_sub_register` message to parent queue; `MainModule._message_loop()` intercepts and stores in `_submodule_registry`
+- MainModule gained `find_capability()` and `list_capabilities()` for capability discovery
+- Moved all submodule files to `submodules/<Family>/` (e.g., `submodules/Re/re_browser.py`)
+- Reimplemented browser, audio, and rules submodules with new decoupled API + capability system
+- Added `interface/audio.py` (STT/TTS backends) and `interface/browser_session.py` (Playwright wrapper)
+- Updated `main.py` with config-driven submodule boot phase
+- Added `submodules` section to `default.yaml`
+- 74 tests passing (51 existing + 23 new)
+
+**Why:**
+Four feature branches (cursor, model-selection, browser, audio) had conflicting submodule patterns. Browser submodules used action-based `handle_message()`, audio submodules used capability-based `invoke()`. Both depended on `parent: MainModule`. Merging them would have caused conflicts in `interface/modules.py`. This restructuring resolves the conflict by making all submodules independent of MainModule and standardizing on the capability pattern.
+
+---
+
 ## Deferred / Future
 
 - [ ] Configurable cognition paths via YAML (not hardcoded in bus.py)
 - [ ] Event sourcing on bus (append-only message log for replay/analysis)
 - [ ] Circuit-breaker pattern for LLM failures
-- [ ] Re sub-modules: Vision, Audio, Net-Search (for web/VR per Q6 answer)
+- [ ] Re sub-modules: Vision, Net-Search (for web/VR per Q6 answer)
 - [ ] Pr sub-module: Plan
 - [ ] Me sub-modules: Short-term, Long-term, Logs
 - [ ] Admin visualization app (WebSocket live view)

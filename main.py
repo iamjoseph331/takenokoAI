@@ -10,7 +10,7 @@ from typing import Any
 import aiofiles
 import yaml
 
-from interface.bus import FamilyPrefix, MessageBus
+from interface.bus import FamilyPrefix, MessageBus, QueueFullPolicy
 from interface.character_model import CharacterModel
 from interface.llm import LLMConfig, configure_api_keys
 from interface.logging import ModuleLogger, setup_logging
@@ -197,6 +197,10 @@ class TakenokoAgent:
         for module in self._families.values():
             await module.start()
 
+        # 10. Boot submodules (config-driven, all disabled by default)
+        self._submodule_instances: list[Any] = []
+        await self._boot_submodules()
+
         self._logger.action(
             f"TakenokoAI started: {len(self._families)} families active"
         )
@@ -243,6 +247,102 @@ class TakenokoAgent:
             logger=logger,
         )
 
+    async def _boot_submodules(self) -> None:
+        """Boot submodules based on YAML config.
+
+        Each submodule is created with interface dependencies only (bus,
+        logger, permissions, llm_config) — no MainModule reference.
+        """
+        sub_cfg = self._config.get("submodules", {})
+        if not sub_cfg:
+            return
+
+        # Registry of available submodule classes
+        # Import lazily to avoid circular imports and allow optional deps
+        _registry: dict[tuple[str, str], type] = {}
+        try:
+            from submodules.Re.re_browser import BrowserSubmodule
+            _registry[("Re", "browser")] = BrowserSubmodule
+        except ImportError:
+            pass
+        try:
+            from submodules.Re.re_audio import AudioSubmodule
+            _registry[("Re", "audio")] = AudioSubmodule
+        except ImportError:
+            pass
+        try:
+            from submodules.Mo.mo_browser import BrowserActionSubmodule
+            _registry[("Mo", "browser")] = BrowserActionSubmodule
+        except ImportError:
+            pass
+        try:
+            from submodules.Mo.mo_audio import AudioActionSubmodule
+            _registry[("Mo", "audio")] = AudioActionSubmodule
+        except ImportError:
+            pass
+        try:
+            from submodules.Me.me_rules import RulesSubmodule
+            _registry[("Me", "rules")] = RulesSubmodule
+        except ImportError:
+            pass
+
+        for family_str, modules in sub_cfg.items():
+            if not isinstance(modules, dict):
+                continue
+            prefix = FamilyPrefix(family_str)
+            for mod_name, mod_cfg in modules.items():
+                if not isinstance(mod_cfg, dict):
+                    continue
+                if not mod_cfg.get("enabled", False):
+                    continue
+
+                cls = _registry.get((family_str, mod_name))
+                if cls is None:
+                    self._logger.action(
+                        f"Submodule {family_str}.{mod_name} not found in registry, skipping"
+                    )
+                    continue
+
+                policy_str = mod_cfg.get("policy", "WAIT")
+                policy = QueueFullPolicy(policy_str)
+                max_retries = mod_cfg.get("max_retries", 3)
+
+                llm_config = self._build_llm_config(prefix)
+                logger = ModuleLogger(family_str, mod_name)
+
+                # Build kwargs common to all submodules
+                kwargs: dict[str, Any] = {
+                    "family_prefix": prefix,
+                    "bus": self._bus,
+                    "logger": logger,
+                    "llm_config": llm_config,
+                    "permissions": self._permissions,
+                    "policy": policy,
+                    "max_retries": max_retries,
+                }
+
+                # Some submodules need extra resources (session, backend)
+                # These are created here based on config
+                if mod_name == "browser":
+                    from interface.browser_session import BrowserSession
+                    session = BrowserSession()
+                    kwargs["session"] = session
+                elif mod_name == "audio" and family_str == "Re":
+                    from interface.audio import STTConfig, create_stt_backend
+                    stt_cfg = STTConfig(**mod_cfg.get("stt", {}))
+                    kwargs["stt_backend"] = create_stt_backend(stt_cfg)
+                elif mod_name == "audio" and family_str == "Mo":
+                    from interface.audio import TTSConfig, create_tts_backend
+                    tts_cfg = TTSConfig(**mod_cfg.get("tts", {}))
+                    kwargs["tts_backend"] = create_tts_backend(tts_cfg)
+
+                instance = cls(**kwargs)
+                await instance.start()
+                self._submodule_instances.append(instance)
+                self._logger.action(
+                    f"Submodule booted: {family_str}.{mod_name} (policy={policy_str})"
+                )
+
     async def run(self) -> None:
         """Run all family message loops concurrently."""
         if not self._families:
@@ -253,9 +353,12 @@ class TakenokoAgent:
                 tg.create_task(module._message_loop())
 
     async def stop(self) -> None:
-        """Stop all families and flush the self-model to disk."""
+        """Stop all submodules, families, and flush the self-model to disk."""
         if self._logger:
             self._logger.action("TakenokoAI shutting down...")
+
+        for sub in getattr(self, "_submodule_instances", []):
+            await sub.stop()
 
         for module in self._families.values():
             await module.stop()
