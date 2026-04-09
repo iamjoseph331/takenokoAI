@@ -58,13 +58,14 @@ Every intermodule message carries these fields:
 
 Messages flow along named paths that represent common cognitive patterns:
 
-| Path | Flow | Purpose |
-|------|------|---------|
-| **P** | `Ev → Pr → Ev → Mo` or `Me` | Deliberate thought — evaluate, plan, evaluate, act |
-| **R** | `Re → Mo` | Reflex — react immediately |
-| **E** | `Re → Ev` | Appraisal — evaluate an input |
-| **U** | `Re → Pr` | Uptake — feed input to planning |
-| **D** | `Pr → Re` or `Ev` or `Mo` or `Me` | Dispatch — prediction drives any family |
+| Path | Flow | Purpose | Example |
+|------|------|---------| ------- |
+| **P** | `Ev → Pr → Ev → Mo` or `Me` | Prediction path - 由Pr主導的深度思考。在決定動作前反覆評量和預測 (由Ev給出可能行為) | 思考下一步棋該下哪裡 |
+| **R** | `Re → Mo` | Reaction path — 由Re主導的快速反應。| 伸手接住掉落的筆 |
+| **E** | `Re → Ev` | Evaluation path — 判斷模式。進入P-Path前的判斷| 將棋盤交由Ev評量 | 
+| **U** | `Re → Pr` | Uptake — Re交由Pr判斷 | 使用者對你說"你能幫我做什麼？" |
+| **D** | `Pr → Re` or `Ev` or `Mo` or `Me` | Dispatch — Pr主動要求行為 | 整理一下記憶 / 去門口看看有沒有貨在那裡 |
+| **N** | Not restricted | Believe in the decision of the family main module | 其他設計中沒有預想到的緊急情境 |
 
 ## self.md — The Agent's Self-Model
 

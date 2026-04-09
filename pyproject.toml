@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-debug = ["fastapi>=0.100", "uvicorn>=0.20"]
+debug = ["fastapi>=0.100", "uvicorn[standard]>=0.20", "websockets", "wsproto"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [build-system]
