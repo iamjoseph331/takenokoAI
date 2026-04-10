@@ -7,7 +7,7 @@ from typing import Any
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output
+from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output, parse_llm_outputs
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
 from interface.prompt_assembler import PromptAssembler

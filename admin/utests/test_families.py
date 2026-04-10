@@ -12,9 +12,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
+from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus, VALID_PATH_ROUTES
 from interface.logging import ModuleLogger
 from interface.modules import MainModule
+from interface.permissions import PermissionAction
 from evaluation.ev_main_module import EvaluationModule
 from memorization.me_main_module import MemorizationModule
 from motion.mo_main_module import MotionModule
@@ -511,3 +512,105 @@ class TestFamilyStates:
         ctx = module._build_broadcast_context()
         assert "Family states:" in ctx
         assert "Re=IDLE" in ctx
+
+
+# ── N Path ──
+
+
+class TestNPath:
+    def test_n_path_in_enum(self):
+        assert CognitionPath.N == "N"
+
+    def test_n_path_valid_routes_all_pairs(self):
+        for sender in FamilyPrefix:
+            for receiver in FamilyPrefix:
+                assert MessageBus.validate_route(sender, receiver, CognitionPath.N)
+
+    def test_n_path_message_id_format(self):
+        msg_id = MessageBus.make_message_id(FamilyPrefix.Re, 1, CognitionPath.N)
+        assert msg_id == "Re00000001N"
+
+    def test_n_path_in_valid_path_routes(self):
+        assert CognitionPath.N in VALID_PATH_ROUTES
+        assert len(VALID_PATH_ROUTES[CognitionPath.N]) == 25  # 5x5
+
+
+# ── SET_STATE ──
+
+
+class TestSetState:
+    def test_set_state_action_exists(self):
+        assert PermissionAction.SET_STATE == "SET_STATE"
+
+    def test_ev_has_set_state_on_wildcard(self, mock_permissions):
+        assert mock_permissions.check(
+            FamilyPrefix.Ev, PermissionAction.SET_STATE, "*"
+        )
+
+    def test_ev_has_set_state_on_specific_families(self, mock_permissions):
+        for prefix in FamilyPrefix:
+            assert mock_permissions.check(
+                FamilyPrefix.Ev, PermissionAction.SET_STATE, prefix.value
+            )
+
+    def test_re_lacks_set_state_on_other_families(self, mock_permissions):
+        assert not mock_permissions.check(
+            FamilyPrefix.Re, PermissionAction.SET_STATE, "Pr"
+        )
+
+    @pytest.mark.asyncio
+    async def test_request_state_change_succeeds_for_ev(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(PredictionModule, "Pr", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        await module.request_state_change("THINKING", FamilyPrefix.Ev)
+        assert module.state == "THINKING"
+
+    @pytest.mark.asyncio
+    async def test_request_state_change_denied_for_re(self, mock_bus, mock_logger, mock_llm_config, mock_permissions):
+        module = _make_module(PredictionModule, "Pr", mock_bus, mock_logger, mock_llm_config, mock_permissions)
+        with pytest.raises(PermissionError, match="lacks SET_STATE"):
+            await module.request_state_change("THINKING", FamilyPrefix.Re)
+
+
+# ── Array output format ──
+
+
+class TestArrayOutputFormat:
+    def test_parse_llm_outputs_array_format(self):
+        from interface.message_codec import parse_llm_outputs
+        raw = '{"messages": [{"body": "plan A", "path": "P", "receiver": "Ev", "summary": "s1"}, {"body": "filler", "path": "R", "receiver": "Mo", "summary": "s2"}]}'
+        results = parse_llm_outputs(raw, FamilyPrefix.Pr, ModuleLogger("TEST", "codec"))
+        assert len(results) == 2
+        assert results[0].body == "plan A"
+        assert results[0].path == CognitionPath.P
+        assert results[0].receiver == FamilyPrefix.Ev
+        assert results[1].body == "filler"
+        assert results[1].path == CognitionPath.R
+        assert results[1].receiver == FamilyPrefix.Mo
+
+    def test_parse_llm_outputs_single_object_compat(self):
+        from interface.message_codec import parse_llm_outputs
+        raw = '{"body": "hello", "path": "E", "receiver": "Ev", "summary": "test"}'
+        results = parse_llm_outputs(raw, FamilyPrefix.Re, ModuleLogger("TEST", "codec"))
+        assert len(results) == 1
+        assert results[0].body == "hello"
+        assert results[0].path == CognitionPath.E
+
+    def test_parse_llm_outputs_invalid_json(self):
+        from interface.message_codec import parse_llm_outputs
+        raw = "Just some plain text"
+        results = parse_llm_outputs(raw, FamilyPrefix.Re, ModuleLogger("TEST", "codec"))
+        assert len(results) == 1
+        assert results[0].parse_error is not None
+        assert results[0].body == raw
+
+    def test_parse_llm_outputs_each_message_correct(self):
+        from interface.message_codec import parse_llm_outputs
+        raw = '{"messages": [{"body": "a", "path": "D", "receiver": "Mo", "summary": "x"}, {"body": "b", "path": "U", "receiver": "Pr", "summary": "y"}, {"body": "c", "path": "N", "receiver": "Me", "summary": "z"}]}'
+        results = parse_llm_outputs(raw, FamilyPrefix.Re, ModuleLogger("TEST", "codec"))
+        assert len(results) == 3
+        assert results[0].path == CognitionPath.D
+        assert results[0].receiver == FamilyPrefix.Mo
+        assert results[1].path == CognitionPath.U
+        assert results[1].receiver == FamilyPrefix.Pr
+        assert results[2].path == CognitionPath.N
+        assert results[2].receiver == FamilyPrefix.Me

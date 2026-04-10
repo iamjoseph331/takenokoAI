@@ -115,17 +115,12 @@ class PromptAssembler:
         return self._identity_cache
 
     async def _load_self_model(self) -> str:
-        """Load agent-level + own-family section from self.md.
-
-        Only includes the Agent section and this family's own section,
-        not all five families, to save context tokens.
-        """
+        """Load all sections from self.md for full cross-family awareness."""
         sections = await self._self_model.load_all()
         if not sections:
             return ""
         lines: list[str] = []
-        for header in ("_preamble", "Agent", self._family_prefix.value):
-            body = sections.get(header, "")
+        for header, body in sections.items():
             if not body:
                 continue
             if header == "_preamble":

@@ -38,6 +38,7 @@ class CognitionPath(StrEnum):
     U = "U"  # Uptake: Re -> Pr
     D = "D"  # Dispatch: Pr -> Re | Ev | Mo | Me
     S = "S"  # Self: sender == receiver (idle wake-up, reconsideration)
+    N = "N"  # Unrestricted: any sender -> any receiver
 
 
 VALID_PATH_ROUTES: dict[CognitionPath, list[tuple[FamilyPrefix, FamilyPrefix]]] = {
@@ -69,10 +70,13 @@ VALID_PATH_ROUTES: dict[CognitionPath, list[tuple[FamilyPrefix, FamilyPrefix]]] 
         (FamilyPrefix.Me, FamilyPrefix.Me),
         (FamilyPrefix.Mo, FamilyPrefix.Mo),
     ],
+    CognitionPath.N: [
+        (s, r) for s in FamilyPrefix for r in FamilyPrefix
+    ],
 }
 
 MESSAGE_ID_PATTERN = re.compile(
-    r"^(Re|Pr|Ev|Me|Mo|re|pr|ev|me|mo)\d{8}[PREUDS]$"
+    r"^(Re|Pr|Ev|Me|Mo|re|pr|ev|me|mo)\d{8}[PREUDSN]$"
 )
 
 DEFAULT_QUEUE_MAXSIZE = 5

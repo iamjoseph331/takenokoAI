@@ -129,7 +129,19 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 ---
 
-## Stage 2: Learning & Self-Improvement
+## Stage 2: Me Memory Architecture
+
+- [ ] Implement 5-type memory store (short-term, long-term, context log, logs, eternal)
+- [ ] Long-term memory: key-value DB with LRU cache of 20 ("dictionary zone")
+- [ ] Eternal memory: 5 pinned items always in Me's LLM context
+- [ ] Full context log: store all message summaries per day
+- [ ] Short-term → long-term promotion mechanism
+- [ ] `[[]]` notation: optionally pre-expand from Me's dictionary (or keep as hint)
+- [ ] Sleep mode: day-change trigger, pause families, Me consolidation, resume
+
+---
+
+## Stage 2.5: Learning & Self-Improvement
 
 - [ ] Design feedback structure for `update_weights()` — outcome schema, feedback flow from Mo → Ev
 - [ ] Implement Ev weight storage and adjustment mechanism
@@ -153,6 +165,7 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 - [ ] Enforce resource limits from config
 - [ ] State derived from workload/resource ratio
 - [ ] Resource-aware scheduling: low-resource families get priority on bus
+- [ ] Re message priority on bus (priority queues or similar)
 - [ ] Revise character.md vs identity prompts (keep separate for now per Q9 answer)
 
 ---
@@ -189,6 +202,20 @@ Status key: `[x]` done, `[ ]` to do, `[~]` partially done, `[!]` needs redesign
 
 **Why:**
 Four feature branches (cursor, model-selection, browser, audio) had conflicting submodule patterns. Browser submodules used action-based `handle_message()`, audio submodules used capability-based `invoke()`. Both depended on `parent: MainModule`. Merging them would have caused conflicts in `interface/modules.py`. This restructuring resolves the conflict by making all submodules independent of MainModule and standardizing on the capability pattern.
+
+### 2026-04-10 — self.md rewrite + design decisions
+
+**What changed:**
+- Rewrote self.md in English with full system awareness (paths, bus, permissions, memory design, submodules)
+- Added CognitionPath.N (unrestricted routing, all sender/receiver pairs valid)
+- Added PermissionAction.SET_STATE with Ev granted direct authority over all family states
+- Changed LLM output format from single JSON object to array of messages (backward compat preserved)
+- Updated PromptAssembler to load all self.md sections (not just Agent + own family)
+- Created new Stage 2 (Me Memory Architecture), renamed old Stage 2 → Stage 2.5
+- Updated Pr to use parse_llm_outputs() for multi-message support
+
+**Why:**
+User drafted a comprehensive self.md revealing design gaps between intent and implementation. 10 design questions were resolved to align the codebase with the intended architecture. Me's 5 memory types, sleep mode, and Re priority are documented but deferred to later stages.
 
 ---
 

@@ -18,6 +18,7 @@ class PermissionAction(StrEnum):
     CHANGE_PROMPT = "CHANGE_PROMPT"
     CHANGE_MODEL = "CHANGE_MODEL"
     RESTART_MODULE = "RESTART_MODULE"
+    SET_STATE = "SET_STATE"
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,16 @@ class PermissionManager:
                     granted_by=FamilyPrefix.Pr,
                 )
             )
+
+        # Ev has authority to set state on all families
+        self._grants.append(
+            PermissionGrant(
+                grantee=FamilyPrefix.Ev,
+                action=PermissionAction.SET_STATE,
+                target="*",
+                granted_by=FamilyPrefix.Pr,
+            )
+        )
 
         # Each family can write its own self.md section and manage itself
         for prefix in FamilyPrefix:

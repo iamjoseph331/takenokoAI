@@ -7,7 +7,7 @@ from typing import Any
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output
+from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output, parse_llm_outputs
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
 from interface.prompt_assembler import PromptAssembler
@@ -19,6 +19,7 @@ Paths:
 - R (Reflex): Simple, time-critical input needing immediate action. Route to Mo.
 - E (Appraisal): Input needing evaluation before acting. Route to Ev.
 - U (Uptake): Complex input requiring strategic planning. Route to Pr.
+- N (Unrestricted): Emergency or unusual situation not covered by other paths.
 
 When in doubt, prefer E over R — it's better to evaluate than to act rashly.
 If the input is simple enough that you can handle it without deep planning, prefer R or E.

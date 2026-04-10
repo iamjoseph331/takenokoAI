@@ -70,36 +70,36 @@ class ParsedLLMOutput:
 
 
 # Prompt instructions that tell the LLM how to format its output
-FORMAT_INSTRUCTIONS = """You MUST respond in valid JSON with exactly these keys:
+FORMAT_INSTRUCTIONS = """You MUST respond in valid JSON. Your response contains one or more messages to send.
+
+Format — array of messages:
 {
-    "body": "<your response/reasoning>",
-    "path": "<one of: P, R, E, U, D, S>",
-    "receiver": "<one of: Re, Pr, Ev, Me, Mo>",
-    "summary": "<one-line summary of what you are doing, e.g. '<Re> routing board state to <Ev> for evaluation'>"
+    "messages": [
+        {
+            "body": "<your response/reasoning>",
+            "path": "<one of: P, R, E, U, D, S, N>",
+            "receiver": "<one of: Re, Pr, Ev, Me, Mo>",
+            "summary": "<one-line broadcast summary>"
+        }
+    ]
 }
 
 Rules:
+- "messages" is an array of one or more messages to send.
+- Each message has: body, path, receiver, summary.
 - "body" contains your actual response content.
-- "path" is the cognition path for the message you want to send.
+- "path" is the cognition path for the message.
 - "receiver" is the target family.
 - "summary" is a short broadcast that all families will see.
-- If you have nothing to send (just answering a question), set path to "S", receiver to your own family prefix, and put your answer in body."""
+- You may send multiple messages at once (e.g., send reasoning to Pr AND a filler response to Mo).
+- If you have nothing to send (just internal thought), use a single message with path "S" and receiver set to your own family prefix."""
 
 
-def parse_llm_output(
-    raw: str,
-    sender: FamilyPrefix,
-    logger: ModuleLogger,
-) -> ParsedLLMOutput:
-    """Parse an LLM response string into structured message fields.
-
-    Attempts JSON parsing first. If that fails, treats the entire
-    response as the body with no routing (returns path=None, receiver=None).
-    """
-    raw = raw.strip()
+def _extract_json(raw: str) -> dict | None:
+    """Try to extract a JSON object from raw LLM output."""
+    cleaned = raw.strip()
 
     # Try to extract JSON from markdown code blocks
-    cleaned = raw
     if cleaned.startswith("```"):
         lines = cleaned.split("\n")
         start = 1
@@ -111,41 +111,28 @@ def parse_llm_output(
         cleaned = "\n".join(lines[start:end])
 
     try:
-        data = json.loads(cleaned)
+        return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Last resort: try to find JSON object in the response
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                data = json.loads(raw[start:end + 1])
-            except json.JSONDecodeError:
-                logger.action(
-                    "Failed to parse LLM output as JSON",
-                    data={"raw_preview": raw[:200]},
-                )
-                return ParsedLLMOutput(
-                    body=raw,
-                    path=None,
-                    receiver=None,
-                    summary="",
-                    raw=raw,
-                    parse_error="Not valid JSON",
-                )
-        else:
-            logger.action(
-                "No JSON found in LLM output",
-                data={"raw_preview": raw[:200]},
-            )
-            return ParsedLLMOutput(
-                body=raw,
-                path=None,
-                receiver=None,
-                summary="",
-                raw=raw,
-                parse_error="No JSON object found",
-            )
+        pass
 
+    # Last resort: find outermost braces
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(raw[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def _parse_single_message(
+    data: dict,
+    raw: str,
+    logger: ModuleLogger,
+) -> ParsedLLMOutput:
+    """Parse a single message dict into ParsedLLMOutput."""
     body = data.get("body", raw)
     summary = data.get("summary", "")
 
@@ -178,3 +165,69 @@ def parse_llm_output(
         summary=summary,
         raw=raw,
     )
+
+
+def parse_llm_outputs(
+    raw: str,
+    sender: FamilyPrefix,
+    logger: ModuleLogger,
+) -> list[ParsedLLMOutput]:
+    """Parse an LLM response into a list of structured message fields.
+
+    Supports both the new array format ({"messages": [...]}) and the
+    legacy single-object format ({"body": ...}). Falls back to a
+    single ParsedLLMOutput with the raw text if JSON parsing fails.
+    """
+    raw = raw.strip()
+    data = _extract_json(raw)
+
+    if data is None:
+        logger.action(
+            "No JSON found in LLM output",
+            data={"raw_preview": raw[:200]},
+        )
+        return [ParsedLLMOutput(
+            body=raw,
+            path=None,
+            receiver=None,
+            summary="",
+            raw=raw,
+            parse_error="No JSON object found",
+        )]
+
+    # New array format: {"messages": [...]}
+    if "messages" in data and isinstance(data["messages"], list):
+        results = []
+        for item in data["messages"]:
+            if isinstance(item, dict):
+                results.append(_parse_single_message(item, raw, logger))
+        if results:
+            return results
+        # Empty messages array — fall through to single-object parse
+
+    # Legacy single-object format: {"body": ..., "path": ..., ...}
+    if "body" in data:
+        return [_parse_single_message(data, raw, logger)]
+
+    # JSON parsed but no recognized structure
+    logger.action(
+        "Failed to parse LLM output as JSON",
+        data={"raw_preview": raw[:200]},
+    )
+    return [ParsedLLMOutput(
+        body=raw,
+        path=None,
+        receiver=None,
+        summary="",
+        raw=raw,
+        parse_error="Not valid JSON",
+    )]
+
+
+def parse_llm_output(
+    raw: str,
+    sender: FamilyPrefix,
+    logger: ModuleLogger,
+) -> ParsedLLMOutput:
+    """Backward-compatible convenience: returns the first parsed output."""
+    return parse_llm_outputs(raw, sender, logger)[0]

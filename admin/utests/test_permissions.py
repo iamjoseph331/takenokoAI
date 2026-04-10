@@ -29,6 +29,7 @@ class TestPermissionAction:
             "CHANGE_PROMPT",
             "CHANGE_MODEL",
             "RESTART_MODULE",
+            "SET_STATE",
         }
         actual = {a.value for a in PermissionAction}
         assert actual == expected

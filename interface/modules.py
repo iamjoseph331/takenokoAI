@@ -341,6 +341,21 @@ class MainModule(BaseModule):
             self._custom_states.add(new_state)
         self._logger.action(f"State: {old_state} -> {new_state}")
 
+    async def request_state_change(
+        self, new_state: ModuleState | str, requester: FamilyPrefix
+    ) -> None:
+        """Change this module's state. Permission-checked (SET_STATE)."""
+        if not self._permissions.check(
+            requester, PermissionAction.SET_STATE, self.family_prefix.value
+        ):
+            raise PermissionError(
+                f"{requester} lacks SET_STATE permission on {self.family_prefix}"
+            )
+        await self.set_state(new_state)
+        self._logger.action(
+            f"State changed to {new_state} by {requester}"
+        )
+
     # ── Async API surface ──
 
     async def get_resources(self) -> dict[str, Any]:
@@ -487,6 +502,18 @@ class MainModule(BaseModule):
                 and message.body.get("_sub_register")
             ):
                 self._handle_sub_registration(message.body)
+                continue
+
+            # Intercept state change requests (e.g. from Ev)
+            if (
+                isinstance(message.body, dict)
+                and message.body.get("_set_state")
+            ):
+                new_state = message.body.get("new_state", "IDLE")
+                try:
+                    await self.request_state_change(new_state, message.sender)
+                except PermissionError as e:
+                    self._logger.action(f"State change denied: {e}")
                 continue
 
             await self.set_state(ModuleState.THINKING)

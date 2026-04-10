@@ -51,6 +51,8 @@ class TestCognitionPath:
             CognitionPath.E,
             CognitionPath.U,
             CognitionPath.D,
+            CognitionPath.S,
+            CognitionPath.N,
         }
 
 
@@ -66,12 +68,15 @@ class TestMessageIdPattern:
             "Ev99999999E",
             "Me00000001U",
             "Mo00000100D",
+            "Pr00000001S",
+            "Re00000001N",
             # Lowercase prefix (ack format)
             "pr00000001P",
             "re00000012R",
             "ev99999999E",
             "me00000001U",
             "mo00000100D",
+            "pr00000001N",
         ],
     )
     def test_valid_ids(self, valid_id: str):

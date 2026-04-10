@@ -6,7 +6,7 @@ from __future__ import annotations
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, infer_fallback_route, parse_llm_output
+from interface.message_codec import FORMAT_INSTRUCTIONS, infer_fallback_route, parse_llm_output, parse_llm_outputs
 from interface.modules import MainModule
 from interface.permissions import PermissionAction, PermissionManager
 from interface.prompt_assembler import PromptAssembler
@@ -27,6 +27,9 @@ After reasoning, send your plan for validation or execution.
 - To execute directly (if urgent and clear): send to Mo via D path.
 - To store information: send to Me via D path.
 - To request more input: send to Re via D path.
+- For emergencies or unusual routing: use N path to any family.
+
+You may send multiple messages at once (e.g., send plan to Ev AND a filler to Mo).
 
 """ + FORMAT_INSTRUCTIONS
 
@@ -107,34 +110,33 @@ class PredictionModule(MainModule):
         context_str = message.context or ""
         body_str = str(body)
 
-        # Use the LLM to reason about whatever arrived
         raw = await self.reason(
             context=f"From {message.sender.value} via {context_str}:\n{body_str}",
             evaluation=body_str if message.sender == FamilyPrefix.Ev else "",
         )
-        parsed = parse_llm_output(raw, FamilyPrefix.Pr, self._logger)
+        outputs = parse_llm_outputs(raw, FamilyPrefix.Pr, self._logger)
 
-        if parsed.path and parsed.receiver:
-            await self.send_message(
-                receiver=parsed.receiver,
-                body={"plan": parsed.body},
-                path=parsed.path,
-                context=f"Pr response to {message.message_id}",
-                parent_message_id=message.message_id,
-                trace_id=message.trace_id,
-                summary=parsed.summary or f"<Pr> responding to <{message.sender.value}>",
-            )
-        elif parsed.body:
-            # LLM didn't specify routing — infer from message context
-            fallback_path, fallback_receiver = infer_fallback_route(
-                message, FamilyPrefix.Pr
-            )
-            await self.send_message(
-                receiver=fallback_receiver,
-                body={"plan": parsed.body},
-                path=fallback_path,
-                context=f"Pr response (fallback route from {message.message_id})",
-                parent_message_id=message.message_id,
-                trace_id=message.trace_id,
-                summary=parsed.summary or f"<Pr> sending plan to <{fallback_receiver.value}>",
-            )
+        for parsed in outputs:
+            if parsed.path and parsed.receiver:
+                await self.send_message(
+                    receiver=parsed.receiver,
+                    body={"plan": parsed.body},
+                    path=parsed.path,
+                    context=f"Pr response to {message.message_id}",
+                    parent_message_id=message.message_id,
+                    trace_id=message.trace_id,
+                    summary=parsed.summary or f"<Pr> responding to <{message.sender.value}>",
+                )
+            elif parsed.body:
+                fallback_path, fallback_receiver = infer_fallback_route(
+                    message, FamilyPrefix.Pr
+                )
+                await self.send_message(
+                    receiver=fallback_receiver,
+                    body={"plan": parsed.body},
+                    path=fallback_path,
+                    context=f"Pr response (fallback route from {message.message_id})",
+                    parent_message_id=message.message_id,
+                    trace_id=message.trace_id,
+                    summary=parsed.summary or f"<Pr> sending plan to <{fallback_receiver.value}>",
+                )
