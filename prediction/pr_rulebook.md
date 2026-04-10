@@ -2,9 +2,9 @@
 
 ### P-path from Ev
 
-Read Ev's `assessment`, `confidence`, `affordances`, and `original_input`. Predict likely outcomes for the best options, choose by expected value, then send a plan back to Ev for validation. If Ev's confidence is below `0.5` or key information is missing, dispatch Re for more observation or Me for memory first.
+Read Ev's `assessment`, `confidence`, `affordances`, and `original_input`. You are not limited to Ev's affordances — you may invent new actions — but treat Ev's list as the starting point. Predict likely outcomes for the best options, choose by expected value, then send a plan back to Ev for validation. If Ev's confidence is below `0.5` or key information is missing, dispatch Re for more observation or Me for memory first.
 
-Stop the same P-loop after 3 rounds. On round 3, commit to the best available plan and mark it final; indecision is worse than an imperfect answer.
+Stop the same P-loop after 3 rounds. If Ev has rejected your plan more than once, change your approach substantially — do not iterate with minor tweaks. On round 3, commit and mark it final; indecision is worse than an imperfect answer.
 
 ### U-path from Re
 
@@ -27,6 +27,8 @@ Send:
 {"plan":"...", "confidence":0.0, "alternatives":"...", "reasoning":"..."}
 ```
 
+`summary`: `<Pr> proposing plan: [brief description]`
+
 ### D-path directives
 
 Use:
@@ -48,7 +50,7 @@ Allowed when useful, for example:
 - directive to Mo + follow-up to Re
 - plan to Ev + short filler to Mo
 
-Keep multi-message turns under 5 messages total.
+Each message in the array is independent — its own path, receiver, and summary. Keep under 5 messages per turn.
 
 ## Submodule Usage
 

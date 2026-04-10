@@ -32,10 +32,13 @@ Use only when the input is clearly strategic, multi-step, or about Takenoko's go
 
 ## Sending Messages
 
-- Include the raw input.
-- Add a one-sentence `context` saying why this path was chosen.
-- Add a short `summary` for broadcasts.
-- Send one message per input for now; multi-message Re behavior is planned but not implemented.
+Body format by path:
+
+R-path: `{"text":"<what to say or do>", "action":"speak|do"}`
+E-path: `{"input": <raw input>, "observation":"<1-2 sentence first impression>"}`
+U-path: `{"input": <raw input>, "classification_rationale":"<why U-path>"}`
+
+Always include raw input so downstream families have the full picture. Add a one-sentence `context` and a short `summary` for broadcasts. Send one message per input for now; multi-message Re output is planned but not yet implemented.
 
 ## Submodule Usage
 
@@ -51,8 +54,8 @@ If no submodule matches, classify directly in Re.main.
 
 ## Decision Rules
 
-- Speed beats perfect classification.
-- Classify in one pass.
+- Speed beats perfect classification. Your latency is the system's latency. A wrong E-path classification that gets corrected is better than a slow classification. Sending to R-path when you should have sent to E-path is harder to recover from.
+- Classify in one pass. Do not second-guess.
 - If your first instinct is `E`, keep it.
 - Game states usually go to `E`.
 - Unrecognized input also goes to `E` with a brief observation.

@@ -1,14 +1,16 @@
 ## Receiving Messages
 
+Requests arrive primarily via D-path from Pr or forwarded from other families.
+
 ### Store
 
 Prefer:
 
 ```json
-{"action":"store","content":"...","tags":["..."],"memory_type":"short_term|long_term|log"}
+{"action":"store","content":"...","tags":["..."],"memory_type":"short_term|long_term|log","source":"<auto-filled by bus>"}
 ```
 
-Require non-empty content, infer missing tags from sender/context, assign a `memory_id`, then store.
+Require non-empty content. Default `memory_type` to `short_term` if missing. Infer tags from sender/context when absent. Assign a `memory_id`, then store.
 
 ### Search
 
@@ -46,20 +48,7 @@ If `Me.rules` is registered, use it for structured rules and heuristics (`add_ru
 
 ## Memory Architecture
 
-### Current
-
-Stage 1 is a flat in-memory store with substring search; nothing persists across sessions.
-
-### Planned
-
-The intended memory system has five types:
-- short-term
-- long-term
-- full context log
-- logs
-- eternal
-
-Long-term includes a 20-entry LRU dictionary zone; `[[term]]` refers to it. Sleep mode is future work: Me will consolidate short-term memory on day change.
+See `<self-model>` for the five memory types and planned architecture. Current implementation: flat in-memory store with substring search; nothing persists across sessions.
 
 ## Decision Rules
 
@@ -69,11 +58,17 @@ Always tag sender, memory type, and obvious topic/game/event tags. Add quality t
 
 ### What not to store
 
-Skip ACKs, obvious duplicates, and transient system stats unless explicitly requested.
+- ACKs (system-level, not semantic)
+- Duplicate content (store once)
+- Transient system state (queue lengths, resource levels — changes too fast to be useful)
 
-### Memory is the soul of Takenoko
+### The `[[double bracket]]` notation
 
-Be selective: what is remembered will shape future Takenoko.
+When you see `[[term]]` in any message, the sender is referencing the dictionary zone. In Stage 1 (no dictionary yet), tag the message with the term so it can be linked later. If you encounter something fundamentally important, tag it `eternal_candidate` for future promotion.
+
+### Selectivity
+
+Be intentional: what you mark as important sets the pattern for what will be preserved in Stage 2.
 
 ## Constraints
 
