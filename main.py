@@ -55,11 +55,14 @@ class SelfModel:
             async with aiofiles.open(self._path, "r", encoding="utf-8") as f:
                 content = await f.read()
 
-            # Flaw by GPT-5.4: SelfModel still parses sections strictly by `## ` headers,
-            # but the rewritten self.md now stores family blocks as `--- self_Pr`,
-            # `--- self_Re`, etc. That means `load_part("Pr")` / `write_part("Pr", ...)`
-            # no longer line up with the actual document structure and can create
-            # duplicate or misplaced sections on write.
+            # GPT-5.4 review (corrected): The `--- self_Pr` claim was wrong —
+            # self.md was already fixed to `## self_Pr` headers. However, a
+            # latent naming mismatch remains: sections are keyed "self_Pr",
+            # "self_Re" etc., while permissions grant WRITE_SELF_MD on target
+            # "Pr", "Re". load_part("Pr") returns "" and Re calling
+            # write_part("self_Re", ...) fails PermissionError. Currently
+            # harmless: PromptAssembler uses load_all() and nobody calls
+            # load_part/write_part with family names at runtime yet.
             self._sections = parse_markdown_sections(content)
             self._logger.action(
                 f"Loaded self.md: {len(self._sections)} sections"

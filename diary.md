@@ -94,6 +94,59 @@ Ran `python3 -m pytest admin/utests/ -v`:
 - All 14 new tests pass
 - Zero regressions introduced
 
+### Step 10: Review of GPT-5.4 code review (b3f2b7a)
+
+Checked all three "Flaw by GPT-5.4" comments for correctness and reviewed multi-message handling in all 5 family modules.
+
+#### Claim 1: self.md format mismatch (main.py)
+
+**Verdict: WRONG on the specifics, partially right on the spirit.**
+
+GPT-5.4 claimed self.md uses `--- self_Pr` separators that the parser can't recognize. This was true in commit 520d604 (Opus), but the user already fixed self.md to use `## self_Pr` headers before the GPT-5.4 review commit (b3f2b7a). The comment was stale.
+
+However, a latent naming mismatch does exist: sections are keyed `"self_Pr"`, `"self_Re"`, etc., while `load_part("Pr")` would look for `"Pr"` (returns ""), and permissions grant `WRITE_SELF_MD` on target `"Re"` not `"self_Re"`. Currently harmless because `PromptAssembler` uses `load_all()` and nobody calls `load_part`/`write_part` with family names at runtime.
+
+**Fix applied:** Rewrote the comment in `main.py` to describe the actual latent issue.
+
+#### Claim 2: Re and Ev discard multi-message outputs (re_main_module.py, ev_main_module.py)
+
+**Verdict: OVERSTATED.**
+
+- `Re.classify_input()` using `parse_llm_output()` (single) is **correct by design** — it returns one `CognitionPath`, not multiple bus messages. A classification function is inherently single-valued.
+- `Ev.evaluate()` using single parsing is also **acceptable** — it returns one assessment dict.
+- The real gaps are elsewhere:
+  1. `Re.perceive()` can only send ONE message. The multi-message pattern from self.md (U-path to Pr + R-path filler to Mo) is not implementable with the current structure.
+  2. `Ev._handle_message()` always sends exactly one message (approve→Mo or reject→Pr). It cannot combine actions (e.g., approve + store to Me) in one turn.
+
+**Fix applied:** Rewrote comments in both files to describe the actual issues.
+
+#### Claim 3: N-path advertised but rejected (re_main_module.py)
+
+**Verdict: CORRECT, but the fix direction is wrong.**
+
+`classify_input()` does reject N (coercing to E). But the fix should be to **remove N from the classify prompt**, not to accept it. `perceive()` only knows three routes (R→Mo, E→Ev, U→Pr); accepting N would just map to the default (Ev), making it identical to E. N is meaningless in this context.
+
+**No code change needed** — the corrected comment already notes this.
+
+#### Multi-message handling across all 5 modules
+
+| Module | Method | Uses multi-parse? | Assessment |
+|--------|--------|-------------------|------------|
+| **Pr** | `_handle_message` | Yes (`parse_llm_outputs` + loop) | **Correct.** Each output becomes a separate bus message. Fallback routes apply per-output. |
+| **Re** | `classify_input` | No (single) | **Correct by design.** Classification is single-valued. |
+| **Re** | `perceive` | N/A | **Gap.** Can only send one message; can't do simultaneous U+R pattern. |
+| **Ev** | `evaluate` | No (single) | **Acceptable.** Returns one assessment dict. |
+| **Ev** | `_handle_message` | No | **Gap.** Always sends exactly one message (approve or reject). |
+| **Mo** | `_handle_message` | N/A (no LLM parsing) | **Correct.** Mo executes, doesn't generate bus messages from LLM output. |
+| **Me** | `_handle_message` | N/A (no LLM parsing) | **Correct.** Me processes store/search/recall commands. |
+
+Minor note on Pr's loop: if multiple outputs lack path/receiver, they all get the same fallback route (from `infer_fallback_route`), potentially flooding one receiver. Also, `_parse_single_message` falls back `body = data.get("body", raw)` where `raw` is the entire LLM response — if an individual message dict in an array is missing "body", it gets the full raw text rather than an empty string.
+
+**Files modified:**
+- `main.py` — corrected GPT-5.4 comment
+- `reaction/re_main_module.py` — corrected GPT-5.4 comment
+- `evaluation/ev_main_module.py` — corrected GPT-5.4 comment
+
 ### Summary of files changed
 
 | File | Change |

@@ -4,7 +4,7 @@ agent:
   log_dir: logs
   log_level: DEBUG
   self_model_path: self.md
-  character_path: character.md
+  character_path: prompts/characters/character.md
 
 families:
   Re:

@@ -92,11 +92,6 @@ class ReactionModule(MainModule):
             {"role": "user", "content": user_content},
         ]
         raw = await self.think(messages)
-        # Flaw by GPT-5.4: FORMAT_INSTRUCTIONS now globally allow an array of
-        # messages and the prompt text advertises N-path, but classify_input()
-        # still parses only the first object and only accepts R/E/U. So an LLM
-        # that follows the new contract can have extra outputs silently dropped,
-        # and an explicit N classification is currently coerced back to E.
         parsed = parse_llm_output(raw, FamilyPrefix.Re, self._logger)
 
         if parsed.path and parsed.path in (CognitionPath.R, CognitionPath.E, CognitionPath.U):
