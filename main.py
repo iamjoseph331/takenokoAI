@@ -55,6 +55,11 @@ class SelfModel:
             async with aiofiles.open(self._path, "r", encoding="utf-8") as f:
                 content = await f.read()
 
+            # Flaw by GPT-5.4: SelfModel still parses sections strictly by `## ` headers,
+            # but the rewritten self.md now stores family blocks as `--- self_Pr`,
+            # `--- self_Re`, etc. That means `load_part("Pr")` / `write_part("Pr", ...)`
+            # no longer line up with the actual document structure and can create
+            # duplicate or misplaced sections on write.
             self._sections = parse_markdown_sections(content)
             self._logger.action(
                 f"Loaded self.md: {len(self._sections)} sections"

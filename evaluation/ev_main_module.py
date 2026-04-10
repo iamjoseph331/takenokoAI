@@ -78,6 +78,10 @@ class EvaluationModule(MainModule):
             {"role": "user", "content": user_content},
         ]
         raw = await self.think(messages)
+        # Flaw by GPT-5.4: the shared FORMAT_INSTRUCTIONS now tell every family
+        # to emit one or more messages, but Ev still reads only the first parsed
+        # object here. Any extra outputs from the evaluator are discarded, so the
+        # new multi-message contract is only partially implemented system-wide.
         parsed = parse_llm_output(raw, FamilyPrefix.Ev, self._logger)
 
         return {
