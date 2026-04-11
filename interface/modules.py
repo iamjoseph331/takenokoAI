@@ -60,6 +60,7 @@ class BaseModule(ABC):
         self._bus = bus
         self._logger = logger
         self._permissions = permissions
+        self._prompt_assembler = prompt_assembler
         self._llm = LLMClient(
             llm_config, logger,
             prompt_assembler=prompt_assembler,
@@ -108,6 +109,28 @@ class BaseModule(ABC):
         )
         self._logger.thought(f"Thought complete: {len(result)} chars")
         return result
+
+    # ── Lessons ──
+
+    async def read_lessons(self) -> str:
+        """Read this family's lessons file."""
+        if self._prompt_assembler is None:
+            return ""
+        return await self._prompt_assembler.read_lessons()
+
+    async def write_lessons(self, content: str) -> None:
+        """Overwrite this family's lessons file and invalidate the prompt cache."""
+        if self._prompt_assembler is None:
+            self._logger.action("write_lessons: no prompt assembler configured")
+            return
+        await self._prompt_assembler.write_lessons(content)
+
+    async def append_lesson(self, lesson: str) -> None:
+        """Append a single lesson entry to this family's lessons file."""
+        if self._prompt_assembler is None:
+            self._logger.action("append_lesson: no prompt assembler configured")
+            return
+        await self._prompt_assembler.append_lesson(lesson)
 
 
 class MainModule(BaseModule):
@@ -213,6 +236,11 @@ class MainModule(BaseModule):
             resources=resources,
             summary=summary,
         )
+
+        # Attribute the last LLM prompt (if any) to this outgoing message so
+        # the viz server can show it on double-click.
+        self._attribute_last_prompt(msg_id)
+
         result = await self._bus.send(message)
 
         if isinstance(result, QueueFullSignal):
@@ -223,6 +251,27 @@ class MainModule(BaseModule):
             return f"FULL:{msg_id}"
 
         return msg_id
+
+    def _attribute_last_prompt(self, message_id: str) -> None:
+        """If the LLM client has a pending last prompt, attach it to this msg.
+
+        Does NOT clear _last_full_messages — a single LLM call may produce
+        multiple outgoing messages (e.g. Pr fanning out). The prompt is
+        overwritten on the next think() call.
+        """
+        last = getattr(self._llm, "_last_full_messages", None)
+        if not last:
+            return
+        meta = getattr(self._llm, "_last_request_meta", None) or {}
+        self._bus.record_prompt(
+            message_id,
+            {
+                "messages": last,
+                "meta": meta,
+                "sender": self.family_prefix.value,
+                "ts": MessageBus.now(),
+            },
+        )
 
     async def send_ack(
         self, original_message: BusMessage, *, queue_size: int | None = None
@@ -728,6 +777,9 @@ class SubModule(BaseModule):
             resources=resources,
             summary=summary,
         )
+
+        self._attribute_last_prompt(msg_id)
+
         result = await self._bus.send(message)
 
         if isinstance(result, QueueFullSignal):

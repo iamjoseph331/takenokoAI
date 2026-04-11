@@ -6,32 +6,10 @@ from __future__ import annotations
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, infer_fallback_route, parse_llm_output, parse_llm_outputs
+from interface.message_codec import infer_fallback_route, parse_llm_outputs
 from interface.modules import MainModule
 from interface.permissions import PermissionAction, PermissionManager
 from interface.prompt_assembler import PromptAssembler
-
-
-_REASON_PROMPT = """You are reasoning over a situation. You have received context and
-an evaluation (or raw perception). Analyze it, form a plan, and decide
-what to do next.
-
-Consider:
-1. What is the current situation?
-2. What are the possible actions and their likely outcomes?
-3. Which action best serves the agent's goals?
-4. How confident are you in this plan?
-
-After reasoning, send your plan for validation or execution.
-- To validate: send to Ev via P path.
-- To execute directly (if urgent and clear): send to Mo via D path.
-- To store information: send to Me via D path.
-- To request more input: send to Re via D path.
-- For emergencies or unusual routing: use N path to any family.
-
-You may send multiple messages at once (e.g., send plan to Ev AND a filler to Mo).
-
-""" + FORMAT_INSTRUCTIONS
 
 
 class PredictionModule(MainModule):
@@ -64,17 +42,22 @@ class PredictionModule(MainModule):
     async def reason(self, context: str, evaluation: str) -> str:
         """Core reasoning — use the LLM to analyze context and evaluation.
 
+        Task framing, routing rules, and output format come from the
+        assembled system prompt (identity + rulebook + character + lessons
+        + output-format). This method only supplies the per-call data.
+
         Returns the raw reasoning result as a string.
         """
         broadcast_ctx = self._build_broadcast_context()
-        user_content = f"Context:\n{context}\n\nEvaluation:\n{evaluation}"
+        parts = []
         if broadcast_ctx:
-            user_content = f"{broadcast_ctx}\n\n{user_content}"
+            parts.append(broadcast_ctx)
+        parts.append(f"Context:\n{context}")
+        if evaluation:
+            parts.append(f"Evaluation:\n{evaluation}")
+        user_content = "\n\n".join(parts)
 
-        messages = [
-            {"role": "system", "content": _REASON_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        messages = [{"role": "user", "content": user_content}]
         return await self.think(messages)
 
     async def dispatch(

@@ -222,13 +222,19 @@ class TakenokoAgent:
             return yaml.safe_load(f)
 
     def _build_llm_config(self, family_prefix: FamilyPrefix) -> LLMConfig:
-        """Build an LLMConfig from the YAML config for a given family."""
+        """Build an LLMConfig from the YAML config for a given family.
+
+        Verbose mode is resolved as: family override > agent default > False.
+        """
         families_cfg = self._config.get("families", {})
         family_cfg = families_cfg.get(family_prefix.value, {})
+        agent_cfg = self._config.get("agent", {})
+        verbose = family_cfg.get("verbose", agent_cfg.get("verbose", False))
         return LLMConfig(
             model_name=family_cfg.get("model", "gpt-4o"),
             temperature=family_cfg.get("temperature", 0.7),
             max_tokens=family_cfg.get("max_tokens", 4096),
+            verbose=bool(verbose),
         )
 
     def _build_prompt_assembler(
@@ -245,6 +251,7 @@ class TakenokoAgent:
             "rulebook",
             f"{family_prefix.value.lower()}/rulebook.md",
         )
+        lessons_path = family_cfg.get("lessons", None)
         logger = ModuleLogger(family_prefix.value, "assembler")
         return PromptAssembler(
             family_prefix=family_prefix,
@@ -253,6 +260,7 @@ class TakenokoAgent:
             rulebook_path=rulebook_path,
             character_model=self._character_model,
             logger=logger,
+            lessons_path=lessons_path,
         )
 
     async def _boot_submodules(self) -> None:

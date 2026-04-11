@@ -5,6 +5,9 @@ agent:
   log_level: DEBUG
   self_model_path: self.md
   character_path: prompts/characters/character.md
+  # When true, every LLM call logs the full assembled prompt + response body
+  # to each family's logger. Per-family override: families.<prefix>.verbose.
+  verbose: false
 
 families:
   Re:

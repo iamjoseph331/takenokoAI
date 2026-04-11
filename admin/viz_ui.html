@@ -142,9 +142,10 @@ body {
   padding: 2px 12px;
   border-left: 2px solid transparent;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  cursor: default;
+  cursor: pointer;
 }
 .feed-entry:hover { background: #1c2128; }
+.feed-entry[title]:hover::after { content: ""; }
 .feed-entry.is-ack { opacity: 0.35; }
 .feed-entry.new { animation: flash 0.4s ease-out; }
 @keyframes flash { from { background: #1f2937; } to { background: transparent; } }
@@ -242,7 +243,7 @@ body {
     </div>
 
     <div id="right-panel">
-      <h3>Message Feed <small style="font-weight:normal;color:#6e7681;text-transform:none;letter-spacing:0;font-size:9px">(acks dimmed)</small></h3>
+      <h3>Message Feed <small style="font-weight:normal;color:#6e7681;text-transform:none;letter-spacing:0;font-size:9px">(acks dimmed · dbl-click for prompt)</small></h3>
       <div id="msg-feed"></div>
       <div id="broadcast-strip">
         <h4>Broadcasts</h4>
@@ -460,9 +461,20 @@ function addFeedEntry(ev) {
   const route = `<span style="color:${pathColor}">${ev.src}→${ev.dst}[${ev.path}]</span>`;
   const summary = ev.summary ? ` <span style="color:#8b949e">${escHtml(ev.summary.slice(0,60))}</span>` : "";
   div.innerHTML = `${route}${summary}`;
+  if (ev.msg_id) {
+    div.dataset.msgId = ev.msg_id;
+    div.title = `${ev.msg_id} — double-click to view the full LLM prompt`;
+  }
   feedEl.appendChild(div);
   feedEl.scrollTop = feedEl.scrollHeight;
 }
+
+// Double-click any feed entry → open its prompt in a new tab.
+feedEl.addEventListener("dblclick", (e) => {
+  const entry = e.target.closest(".feed-entry");
+  if (!entry || !entry.dataset.msgId) return;
+  window.open(`/prompt/${encodeURIComponent(entry.dataset.msgId)}`, "_blank");
+});
 
 // ── Broadcasts ──
 const bcList = document.getElementById("bc-list");

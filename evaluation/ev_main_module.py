@@ -7,35 +7,11 @@ from typing import Any
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output, parse_llm_outputs
+from interface.message_codec import parse_llm_output
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
 from interface.prompt_assembler import PromptAssembler
 
-
-_EVALUATE_PROMPT = """Evaluate the given situation or plan. Your assessment must include:
-
-1. **assessment**: What is happening? Is this good, bad, or neutral?
-2. **confidence**: A score from 0.0 to 1.0 indicating how certain you are.
-3. **affordances**: A list of possible actions available from this state.
-
-If evaluating a plan from Pr:
-- confidence >= 0.7: Approve and route to Mo for execution.
-- confidence < 0.5: Reject with specific objections, send back to Pr.
-- Between 0.5 and 0.7: Approve with caveats.
-
-""" + FORMAT_INSTRUCTIONS
-
-_AFFORDANCE_PROMPT = """Generate possible actions (affordances) for the given situation.
-
-List 2-5 possible actions. For each, include:
-- What the action is
-- Expected outcome
-- Risk level (low/medium/high)
-
-Be creative but realistic. Include at least one safe option and one ambitious option.
-
-""" + FORMAT_INSTRUCTIONS
 
 AFFORDANCE_TEMPERATURE = 0.8
 
@@ -66,17 +42,20 @@ class EvaluationModule(MainModule):
     async def evaluate(self, target: str, context: str) -> dict[str, Any]:
         """Assess a target (self, environment, or goal) in the given context.
 
+        Task framing (what to assess, how to score, how to route) lives in
+        the assembled system prompt (ev_rulebook.md + output-format). This
+        method only passes the data.
+
         Returns a dict with keys: assessment, confidence, affordances, raw.
         """
         broadcast_ctx = self._build_broadcast_context()
-        user_content = f"Target: {target}\nContext:\n{context}"
+        parts = []
         if broadcast_ctx:
-            user_content = f"{broadcast_ctx}\n\n{user_content}"
+            parts.append(broadcast_ctx)
+        parts.append(f"Task: evaluate\nTarget: {target}\nContext:\n{context}")
+        user_content = "\n\n".join(parts)
 
-        messages = [
-            {"role": "system", "content": _EVALUATE_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        messages = [{"role": "user", "content": user_content}]
         raw = await self.think(messages)
         parsed = parse_llm_output(raw, FamilyPrefix.Ev, self._logger)
 
@@ -91,16 +70,19 @@ class EvaluationModule(MainModule):
         }
 
     async def generate_affordances(self, situation: str) -> list[str]:
-        """Brainstorm possible actions using a higher temperature for creativity."""
-        broadcast_ctx = self._build_broadcast_context()
-        user_content = f"Situation:\n{situation}"
-        if broadcast_ctx:
-            user_content = f"{broadcast_ctx}\n\n{user_content}"
+        """Brainstorm possible actions using a higher temperature for creativity.
 
-        messages = [
-            {"role": "system", "content": _AFFORDANCE_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        Affordance rules (count, risk levels, safe vs ambitious) are in the
+        assembled system prompt (ev_rulebook.md).
+        """
+        broadcast_ctx = self._build_broadcast_context()
+        parts = []
+        if broadcast_ctx:
+            parts.append(broadcast_ctx)
+        parts.append(f"Task: generate affordances\nSituation:\n{situation}")
+        user_content = "\n\n".join(parts)
+
+        messages = [{"role": "user", "content": user_content}]
         raw = await self.think(messages, temperature_override=AFFORDANCE_TEMPERATURE)
         parsed = parse_llm_output(raw, FamilyPrefix.Ev, self._logger)
 

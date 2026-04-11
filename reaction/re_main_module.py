@@ -7,24 +7,10 @@ from typing import Any
 from interface.bus import BusMessage, CognitionPath, FamilyPrefix, MessageBus
 from interface.llm import CompletionFn, LLMConfig
 from interface.logging import ModuleLogger
-from interface.message_codec import FORMAT_INSTRUCTIONS, parse_llm_output, parse_llm_outputs
+from interface.message_codec import parse_llm_output
 from interface.modules import MainModule
 from interface.permissions import PermissionManager
 from interface.prompt_assembler import PromptAssembler
-
-
-_CLASSIFY_PROMPT = """Classify this input and decide which cognition path it should follow.
-
-Paths:
-- R (Reflex): Simple, time-critical input needing immediate action. Route to Mo.
-- E (Appraisal): Input needing evaluation before acting. Route to Ev.
-- U (Uptake): Complex input requiring strategic planning. Route to Pr.
-- N (Unrestricted): Emergency or unusual situation not covered by other paths.
-
-When in doubt, prefer E over R — it's better to evaluate than to act rashly.
-If the input is simple enough that you can handle it without deep planning, prefer R or E.
-
-""" + FORMAT_INSTRUCTIONS
 
 
 class ReactionModule(MainModule):
@@ -81,16 +67,19 @@ class ReactionModule(MainModule):
         return msg_id
 
     async def classify_input(self, input_data: dict[str, Any]) -> CognitionPath:
-        """Use the LLM to decide which cognition path this input should follow."""
-        broadcast_ctx = self._build_broadcast_context()
-        user_content = f"Input to classify:\n{input_data}"
-        if broadcast_ctx:
-            user_content = f"{broadcast_ctx}\n\n{user_content}"
+        """Use the LLM to decide which cognition path this input should follow.
 
-        messages = [
-            {"role": "system", "content": _CLASSIFY_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        Classification rules (R / E / U / N and tie-breakers) live in the
+        assembled system prompt (re_rulebook.md).
+        """
+        broadcast_ctx = self._build_broadcast_context()
+        parts = []
+        if broadcast_ctx:
+            parts.append(broadcast_ctx)
+        parts.append(f"Task: classify input\nInput:\n{input_data}")
+        user_content = "\n\n".join(parts)
+
+        messages = [{"role": "user", "content": user_content}]
         raw = await self.think(messages)
         parsed = parse_llm_output(raw, FamilyPrefix.Re, self._logger)
 

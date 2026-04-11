@@ -21,9 +21,10 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from interface.bus import FamilyPrefix  # noqa: E402
+from interface.bus import CognitionPath, FamilyPrefix  # noqa: E402
 from main import TakenokoAgent  # noqa: E402
 from motion.mo_main_module import MotionModule  # noqa: E402
+from prediction.pr_main_module import PredictionModule  # noqa: E402
 from reaction.re_main_module import ReactionModule  # noqa: E402
 
 
@@ -41,12 +42,31 @@ async def _chat_loop(
     re_module = agent.get_family(FamilyPrefix.Re)
     mo_module = agent.get_family(FamilyPrefix.Mo)
 
+    pr_module = agent.get_family(FamilyPrefix.Pr)
+
     if not isinstance(re_module, ReactionModule):
         raise TypeError("Expected ReactionModule")
     if not isinstance(mo_module, MotionModule):
         raise TypeError("Expected MotionModule")
+    if not isinstance(pr_module, PredictionModule):
+        raise TypeError("Expected PredictionModule")
 
     print("\nTakenoko is ready. Type your message and press Enter (Ctrl-D or 'exit' to quit).\n")
+
+    # Innate startup thought — Pr reflects directly on waking up via S-path.
+    # Re is intentionally bypassed: this is not an external perception.
+    await pr_module.send_message(
+        receiver=FamilyPrefix.Pr,
+        body={"thought": "You have just woken up. Think about yourself."},
+        path=CognitionPath.S,
+        context="system startup",
+        summary="<Pr> waking up",
+    )
+    try:
+        greeting = await mo_module.get_output(timeout=30.0)
+        print(f"Takenoko: {greeting}\n")
+    except TimeoutError:
+        pass
 
     while not stop_event.is_set():
         try:
@@ -110,12 +130,18 @@ async def _run_server(server: object, stop_event: asyncio.Event) -> None:
 
 
 async def amain(
-    config: str, viz_port: int, no_viz: bool, debug_port: int, no_debug: bool
+    config: str, viz_port: int, no_viz: bool, debug_port: int, no_debug: bool,
+    verbose: bool,
 ) -> None:
     # ── Boot agent ─────────────────────────────────────────────────────────
     print(f"[runner] Booting TakenokoAI from {config} ...")
     agent = TakenokoAgent(config)
     await agent.start()
+    if verbose:
+        # CLI flag overrides YAML: flip the verbose bit on every family's LLM.
+        for module in agent._families.values():
+            module._llm._config.verbose = True
+        print("[runner] Verbose mode: full prompts will be logged per call.")
     print("[runner] Agent started.")
 
     stop_event = asyncio.Event()
@@ -196,10 +222,18 @@ def main() -> None:
         action="store_true",
         help="Disable debug API server",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Log the full prompt + response body on every LLM call",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(amain(args.config, args.viz_port, args.no_viz, args.debug_port, args.no_debug))
+        asyncio.run(amain(
+            args.config, args.viz_port, args.no_viz,
+            args.debug_port, args.no_debug, args.verbose,
+        ))
     except KeyboardInterrupt:
         pass
 

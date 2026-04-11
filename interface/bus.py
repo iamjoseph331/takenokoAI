@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Coroutine
@@ -81,6 +81,7 @@ MESSAGE_ID_PATTERN = re.compile(
 
 DEFAULT_QUEUE_MAXSIZE = 5
 DEFAULT_BROADCAST_BUFFER_SIZE = 20
+DEFAULT_PROMPT_LOG_SIZE = 500
 
 
 class QueueFullPolicy(StrEnum):
@@ -152,6 +153,7 @@ class MessageBus:
         logger: ModuleLogger,
         queue_limits: dict[str, int] | None = None,
         broadcast_buffer_size: int = DEFAULT_BROADCAST_BUFFER_SIZE,
+        prompt_log_size: int = DEFAULT_PROMPT_LOG_SIZE,
     ) -> None:
         self._logger = logger
         self._queue_limits = queue_limits or {}
@@ -166,6 +168,12 @@ class MessageBus:
         self._family_counters: dict[str, int] = {}
         # Optional hook called synchronously in send() for visualization
         self.viz_hook: Callable[[BusMessage], None] | None = None
+        # Bounded LRU of prompts keyed by the message_id they produced.
+        # Populated by MainModule/SubModule.send_message() when the send was
+        # triggered by a preceding LLM call. Read by the viz server to power
+        # the "double-click a message → show full prompt" feature.
+        self._prompt_log_size = prompt_log_size
+        self._prompt_log: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
     def _resolve_maxsize(self, module_name: str) -> int:
         """Resolve queue maxsize for a module."""
@@ -203,6 +211,28 @@ class MessageBus:
         """Return the last N broadcasts (most recent last)."""
         items = list(self._broadcasts)
         return items[-n:] if len(items) > n else items
+
+    # ── Prompt log (for viz double-click) ──
+
+    def record_prompt(self, message_id: str, prompt_data: dict[str, Any]) -> None:
+        """Attribute an LLM prompt to a message that was sent as a result.
+
+        prompt_data keys:
+          - messages: list[{"role": ..., "content": ...}]
+          - meta:     {"model": ..., "temperature": ..., "max_tokens": ...}
+          - sender:   family prefix string
+          - ts:       float (monotonic timecode)
+        Older entries are evicted once the log reaches prompt_log_size.
+        """
+        if message_id in self._prompt_log:
+            self._prompt_log.move_to_end(message_id)
+        self._prompt_log[message_id] = prompt_data
+        while len(self._prompt_log) > self._prompt_log_size:
+            self._prompt_log.popitem(last=False)
+
+    def get_prompt(self, message_id: str) -> dict[str, Any] | None:
+        """Return the prompt attributed to a message_id, or None."""
+        return self._prompt_log.get(message_id)
 
     async def send(self, message: BusMessage) -> QueueFullSignal | None:
         """Validate and route a message to its receiver's queue."""

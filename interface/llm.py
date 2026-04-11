@@ -139,6 +139,7 @@ class LLMConfig:
     temperature: float = 0.7
     max_tokens: int = 4096
     timeout_s: float = DEFAULT_LLM_TIMEOUT_S
+    verbose: bool = False  # when True, log the full prompt on every complete()
     extra_params: dict[str, Any] = field(default_factory=dict)
 
 
@@ -167,6 +168,12 @@ class LLMClient:
         self._prompt_assembler = prompt_assembler
         self._system_prompt_cache: str | None = None
         self._completion_fn: CompletionFn = completion_fn or litellm.acompletion
+        # Last full request (system + user messages) sent to the LLM.
+        # Captured so callers can attribute this prompt to the bus message
+        # that gets sent as a result of the completion. Reset by consumers
+        # after attribution to avoid mis-linking unrelated sends.
+        self._last_full_messages: list[dict[str, str]] | None = None
+        self._last_request_meta: dict[str, Any] | None = None
 
     @property
     def config(self) -> LLMConfig:
@@ -217,10 +224,28 @@ class LLMClient:
             full_messages.append({"role": "system", "content": system_prompt})
         full_messages.extend(messages)
 
+        # Capture the exact request so a caller (e.g. MainModule.send_message)
+        # can attribute it to the resulting bus message for visualization.
+        self._last_full_messages = [dict(m) for m in full_messages]
+        self._last_request_meta = {
+            "model": self._config.model_name,
+            "temperature": temperature,
+            "max_tokens": self._config.max_tokens,
+        }
+
         self._logger.thought(
             f"LLM request: model={self._config.model_name}, "
             f"messages={len(full_messages)}, temp={temperature}"
         )
+
+        if self._config.verbose:
+            preview = "\n\n".join(
+                f"── {m.get('role', '?').upper()} ──\n{m.get('content', '')}"
+                for m in full_messages
+            )
+            self._logger.thought(
+                f"[verbose] Full prompt ({len(full_messages)} messages):\n{preview}"
+            )
 
         try:
             response = await asyncio.wait_for(
@@ -242,6 +267,8 @@ class LLMClient:
 
         content = response.choices[0].message.content or ""
         self._logger.thought(f"LLM response: {len(content)} chars")
+        if self._config.verbose:
+            self._logger.thought(f"[verbose] Response body:\n{content}")
         return content
 
     async def complete_stream(

@@ -92,7 +92,7 @@ Rules:
 - "receiver" is the target family.
 - "summary" is a short broadcast that all families will see.
 - You may send multiple messages at once (e.g., send reasoning to Pr AND a filler response to Mo).
-- If you have nothing to send (just internal thought), use a single message with path "S" and receiver set to your own family prefix."""
+- You are encouraged to send internal thoughts whenyou have spare time, use a single message with path "S" and receiver set to your own family prefix."""
 
 
 def _extract_json(raw: str) -> dict | None:
